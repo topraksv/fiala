@@ -1,0 +1,6 @@
+{
+  "threshold": 1,
+  "reporters": ["consoleFull"],
+  "format": ["typescript", "tsx"],
+  "absolute": true
+}

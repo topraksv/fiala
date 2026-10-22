@@ -1,0 +1,11 @@
+{
+  "cli": {
+    "version": "24.8.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "production": {
+      "autoIncrement": true
+    }
+  }
+}

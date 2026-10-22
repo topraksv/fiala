@@ -1,0 +1,18 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    // Named rather than left to the automatic `@types/*` scan, whose
+    // hoisting-dependent registration of `node:*` broke a clean `npm ci`. The
+    // major matches `.nvmrc`.
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  // Deno's, with remote imports; a test imports what it runs of them.
+  // Expo's generated types exist only where Expo has run. Expo CLI writes them
+  // back into `include` and never reads `exclude`, so they are left out here.
+  "exclude": ["node_modules", "dist", "coverage", "supabase/functions", "expo-env.d.ts", ".expo"]
+}

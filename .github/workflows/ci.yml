@@ -1,0 +1,603 @@
+# Risk-tiered verification and automatic delivery from main. The job graph is
+# shared; only the client keys and the Chromium shard count are per-repo data.
+#
+# Every push proves types, the lint ratchet and the unit suite. A push that can
+# change what a browser renders runs the whole browser suite, sharded. A change
+# to correctness-sensitive or unrecognised paths adds the coverage floors and
+# mutation. Both deploy targets consume that same `gate` result; the classifier
+# decides whether either artifact can have changed, and each one is built
+# beside the checks, so a deploy only uploads bytes that already exist.
+#
+# "Changed" is measured from the last push run that finished green, never from
+# the previous push alone. A run that fails or is cancelled publishes nothing,
+# and measuring from `github.event.before` handed its unpublished changes to a
+# follow-up that could not see them.
+#
+# The EXPO_PUBLIC_* values are client-side keys: they ship inside the JS bundle
+# by design (same values as .env), so they are safe here. The service role key
+# is NOT used in this workflow — it lives only in the keepalive secret. The
+# browser suite's export blanks them (`scripts/export-e2e-web.mjs`).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_target:
+        description: "Optional redeploy target; none runs the full checks only."
+        required: true
+        type: choice
+        options: [none, web, mobile, both]
+        default: none
+
+permissions:
+  contents: read
+
+# A newer push makes an older run's answer worthless: it can only certify a
+# commit that is no longer the head of main. Cancelling it loses nothing,
+# because the newer run measures from the last green run and so carries
+# everything the cancelled one would have published.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPO_PUBLIC_SUPABASE_URL: https://xadmlgiudcozuiijjbhx.supabase.co
+  EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_hmReySpqSScnfc_lAesTxA_LTrx9q77
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # The `base` step reads this workflow's own run history.
+      actions: read
+    outputs:
+      base: ${{ steps.base.outputs.sha }}
+      mutation_base: ${{ steps.base.outputs.mutation }}
+      full_gate: ${{ steps.raw.outputs.full_gate }}
+      run_web_build: ${{ steps.route.outputs.run_web_build }}
+      run_e2e: ${{ steps.raw.outputs.run_e2e }}
+      deploy_web: ${{ steps.route.outputs.deploy_web }}
+      deploy_mobile: ${{ steps.route.outputs.deploy_mobile }}
+      reason: ${{ steps.raw.outputs.reason }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # A fast-forward may contain months of commits, and the base below
+          # can be older still. It must exist locally or the safe classifier
+          # answer is an unnecessary fail-open dual deploy.
+          fetch-depth: 0
+      # Only a green run published what its diff selected, so the newest green
+      # push run that this commit descends from is where production stands. The
+      # push's own `before` is the fallback when there is none to find — the
+      # first run, an unanswered API call — and a dispatch keeps no base at
+      # all, because its fail-open full gate is the point of dispatching. Its
+      # mutation still measures from that green run: with no base it would
+      # mutate the sentinels alone, and a dispatch may publish a commit whose
+      # push run failed.
+      - id: base
+        name: Measure from the last run that published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # `check-published.mjs green` says why it filters nothing in the query.
+          green=$(node scripts/check-published.mjs green | sed -n 's/^sha=//p') || green=""
+          if [ -n "$green" ] && ! git merge-base --is-ancestor "$green" "$HEAD_SHA"; then green=""; fi
+          base=""
+          mutation="$green"
+          if [ "$EVENT_NAME" = "push" ]; then
+            base="$BEFORE_SHA"
+            if [ -n "$green" ]; then
+              base="$green"
+            else
+              echo "::warning::no green ci push run is an ancestor of $HEAD_SHA; measuring from the push's own base, which cannot see an earlier run that published nothing"
+              # The classifier ships nothing for an empty diff, and from here
+              # that proves only that nothing changed since a push that may
+              # itself have failed, so an empty diff runs everything instead.
+              if git diff --quiet "$BEFORE_SHA" "$HEAD_SHA" 2>/dev/null; then base=""; fi
+            fi
+            mutation="$base"
+            # Everything runs, mutation too: from the empty tree, every scoped
+            # file is changed. A push with no base used to fail the selector.
+            if [ -z "$mutation" ]; then mutation="$(git hash-object -t tree /dev/null)"; fi
+          fi
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+          echo "mutation=$mutation" >> "$GITHUB_OUTPUT"
+          echo "base: ${base:-none}, mutation: ${mutation:-none}"
+      - id: raw
+        name: Classify changed paths
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: node scripts/classify-changes.mjs "$BASE_SHA" "$HEAD_SHA"
+      - id: route
+        name: Apply an explicit manual target override
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TARGET: ${{ inputs.release_target || 'none' }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          FULL_GATE: ${{ steps.raw.outputs.full_gate }}
+          RUN_WEB_BUILD: ${{ steps.raw.outputs.run_web_build }}
+          RUN_E2E: ${{ steps.raw.outputs.run_e2e }}
+          DEPLOY_WEB: ${{ steps.raw.outputs.deploy_web }}
+          DEPLOY_MOBILE: ${{ steps.raw.outputs.deploy_mobile }}
+          REASON: ${{ steps.raw.outputs.reason }}
+        run: |
+          set -euo pipefail
+          run_web_build="$RUN_WEB_BUILD"
+          deploy_web="$DEPLOY_WEB"
+          deploy_mobile="$DEPLOY_MOBILE"
+
+          # A dispatch has no honest diff and therefore keeps the classifier's
+          # fail-open full gate. The explicit target only narrows publication.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            run_web_build=false
+            deploy_web=false
+            deploy_mobile=false
+            case "$RELEASE_TARGET" in
+              none) ;;
+              web) run_web_build=true; deploy_web=true ;;
+              mobile) deploy_mobile=true ;;
+              both) run_web_build=true; deploy_web=true; deploy_mobile=true ;;
+              *) echo "::error::unknown release target '$RELEASE_TARGET'"; exit 1 ;;
+            esac
+          fi
+
+          {
+            echo "run_web_build=$run_web_build"
+            echo "deploy_web=$deploy_web"
+            echo "deploy_mobile=$deploy_mobile"
+          } >> "$GITHUB_OUTPUT"
+          echo "classification: $REASON"
+
+          # On the run's summary page: a skipped job looks the same whether it
+          # was inapplicable or misrouted, and this says which it was.
+          {
+            echo "### Gate: $([ "$FULL_GATE" = "true" ] && echo full || echo light)"
+            echo ""
+            echo "- **Reason:** $REASON"
+            echo "- **Measured from:** ${BASE_SHA:-no base, so everything runs}"
+            echo "- **Browser suite:** $RUN_E2E · **web build:** $run_web_build"
+            echo "- **Publishes:** web=$deploy_web · mobile=$deploy_mobile"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  check:
+    needs: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The unit suite reads this repository's history: it asserts the
+          # mutation selector from a fixed commit a depth-one checkout lacks.
+          fetch-depth: 0
+      # `.nvmrc` is the version, here and locally. Node 24/26 native TypeScript
+      # stripping breaks this SDK's toolchain (it chokes on expo-modules-core's
+      # src/index.ts), so the pin is a floor AND a ceiling and
+      # `docs/ARCHITECTURE.md` records both.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # The ratchet runs ESLint itself and gates on `lint-baseline.json`, so
+      # this is the lint step rather than a second one after it.
+      - run: npm run lint:ratchet
+      # One run of the unit suite per commit: under the per-file coverage
+      # floors when the full gate is chosen, plain otherwise.
+      - if: needs.classify.outputs.full_gate == 'true'
+        run: npm run test:coverage
+      - if: needs.classify.outputs.full_gate != 'true'
+        run: npm test
+
+  # Beside `check`, not after it. Waiting bought nothing but the minute `check`
+  # takes: a red `check` fails the gate either way, and on a public repository
+  # the shards' runner time is free.
+  mutation:
+    needs: classify
+    if: needs.classify.outputs.full_gate == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Divided across runners rather than given a longer limit: a release scope
+    # outruns one runner's 90 minutes. `stryker.ci.config.mjs` deals each shard
+    # its part by recorded cost; at six, Helix's whole scope ends with its
+    # heaviest file, which no further shard can split.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      # The last green run, so mutation covers every change that has not yet
+      # passed a gate — a failed run's included — and not only this push's.
+      MUTATION_BASE_SHA: ${{ needs.classify.outputs.mutation_base }}
+      MUTATION_HEAD_SHA: ${{ github.sha }}
+      MUTATION_EVENT_NAME: ${{ github.event_name }}
+      MUTATION_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The selector diffs from the base; a depth-one checkout cannot.
+          fetch-depth: 0
+      # A shard dealt no file skips the pass instead of handing Stryker an
+      # empty list, which a change touching one file does to all but one. Asked
+      # before setup and install: the config imports nothing installed, and the
+      # runner's own Node reads it, so an idle shard spends seconds, not the
+      # install.
+      - id: scope
+        run: |
+          set -euo pipefail
+          files=$(node --input-type=module -e 'const { default: config } = await import("./stryker.ci.config.mjs"); console.log(config.mutate.length)')
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "shard $MUTATION_SHARD mutates $files file(s)"
+      - if: steps.scope.outputs.files != '0'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - if: steps.scope.outputs.files != '0'
+        run: npm ci
+      - if: steps.scope.outputs.files != '0'
+        run: npm run test:mutation:ci
+      # The ratchet names the files that regressed; the surviving mutants that
+      # explain why are in this report, and re-running a release scope to find
+      # them costs the same hour again.
+      - if: failure() && steps.scope.outputs.files != '0'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report-${{ github.run_id }}-shard${{ matrix.shard }}
+          path: reports/mutation
+          retention-days: 7
+          if-no-files-found: ignore
+
+  web-build:
+    needs: classify
+    if: needs.classify.outputs.run_web_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      entry: ${{ steps.entry.outputs.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # `--clear` (inside the script) is mandatory on every production bundle:
+      # Metro's transform cache key does NOT include EXPO_PUBLIC_* values, so a
+      # cache left behind by the local-only E2E export produces a bundle with
+      # no Supabase configuration at all.
+      - run: npm run web:export
+      - run: npm run bundle:check
+      # GitHub Pages serves 404.html for unknown paths (e.g. deep links to
+      # dynamic routes). Use the root shell: copying +not-found hydrates the
+      # wrong server route before the client resolves the real URL and emits
+      # React hydration error #418.
+      - run: cp dist/index.html dist/404.html
+      # The one name in the export that changes whenever its code does: the
+      # entry bundle is named by its content hash. `deploy-web` asks the live
+      # site for exactly this name, read by the same code.
+      - id: entry
+        run: node scripts/check-published.mjs entry dist >> "$GITHUB_OUTPUT"
+      # Uploaded here and only here. `deploy-web` consumes this exact artifact,
+      # so the bytes that were budget-checked are the bytes that get served.
+      - if: needs.classify.outputs.deploy_web == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: dist
+
+  # The Expo Go bundles, built beside the checks. `eas update` exported them
+  # inside `deploy-mobile`, behind the gate: about three minutes of Metro, most
+  # of it a web and a server export nobody publishes, because eas-cli cannot
+  # see the Expo CLI nested under `expo/` and falls back to `--platform=all`.
+  # This is the export it makes when it can, with the `.env` it ignores under
+  # `--environment` ignored here too, so it reproduces the published hashes.
+  mobile-build:
+    needs: classify
+    if: needs.classify.outputs.deploy_mobile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Export the Expo Go bundles
+        env:
+          EXPO_NO_DOTENV: "1"
+        run: npx expo export --output-dir "$RUNNER_TEMP/dist-mobile" --source-maps --dump-assetmap --platform ios --platform android --clear
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-mobile-${{ github.run_id }}
+          path: ${{ runner.temp }}/dist-mobile
+          retention-days: 1
+          if-no-files-found: error
+
+  # One export for every shard: each used to build its own, which cost a Metro
+  # bundle apiece and let two shards test two separately produced artifacts.
+  e2e-build:
+    needs: classify
+    if: needs.classify.outputs.run_e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Local-only by construction (blank Supabase env), which is why it never
+      # becomes the Pages artifact and why the suite can never write real data.
+      - run: npm run test:e2e:export
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-e2e-${{ github.run_id }}
+          path: dist-e2e
+          retention-days: 1
+          if-no-files-found: error
+
+  # The whole suite on every push that can change what it renders, never a
+  # subset: a subset leaves the rest to a nightly that reports after the deploy.
+  e2e:
+    needs: e2e-build
+    name: e2e (${{ matrix.project }} ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # One row per runner. Firefox runs the `@cross-browser` tests on a runner
+      # of its own: dealt with the rest, they all landed on the last shard.
+      matrix:
+        include:
+          - { project: chromium, browser: chromium, shard: 1/1 }
+          - { project: firefox-critical, browser: firefox, shard: 1/1 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # The browsers are ~180 MB and fetching them on every shard hung. Keyed
+      # on the Playwright version and the one browser this row drives, so a bump
+      # misses once and no row downloads a browser it skips.
+      - id: playwright-version
+        run: echo "value=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.value }}-${{ matrix.browser }}
+      # Only on a miss: `--with-deps` is an `apt-get install`, the step that
+      # hung. On a hit the system libraries are in the runner image, and a
+      # missing one fails loudly at browser launch.
+      - run: npx playwright install "$BROWSER" --with-deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        env:
+          BROWSER: ${{ matrix.browser }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist-e2e-${{ github.run_id }}
+          path: dist-e2e
+      # One worker per runner: parallelism comes from sharding, because this
+      # suite drives one browser against one static server and got flaky the
+      # moment two workers shared it. `fullyParallel` in the Playwright config
+      # balances a project's shards by test rather than by file. Playwright is
+      # invoked directly so the shared artifact is not rebuilt.
+      - run: npx playwright test --project="$PROJECT" --shard="$SHARD"
+        env:
+          PROJECT: ${{ matrix.project }}
+          SHARD: ${{ matrix.shard }}
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-failure-${{ github.run_id }}-${{ strategy.job-index }}
+          path: |
+            test-results
+            playwright-report
+          retention-days: 7
+      # A flaky pass is a failure its retry hid, and the shard still goes green
+      # and deploys. The failed attempt's trace and screenshot are in
+      # test-results; a clean run leaves none, so this uploads nothing then.
+      - if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-flaky-${{ github.run_id }}-${{ strategy.job-index }}
+          path: |
+            test-results/**/trace.zip
+            test-results/**/*.png
+            test-results/**/error-context.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # What both deploys wait on. It is not a branch-protection required check:
+  # pushes land on `main` directly, and a required check would refuse every
+  # one of them, so this job is the only merge gate there is. Tier-inapplicable
+  # jobs are correctly skipped, so only a failure or cancellation blocks either
+  # deploy target.
+  gate:
+    if: always()
+    needs: [classify, check, mutation, web-build, mobile-build, e2e-build, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail on any real job failure
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "blocking deploy: a required job reported '$result'"; exit 1 ;;
+            esac
+          done
+
+  # `gate` is declared `if: always()` so a correctly skipped job cannot block
+  # it. GitHub then propagates that upstream "skipped" state down the needs
+  # chain, so a plain `needs: gate` leaves this job skipped even when `gate`
+  # itself succeeded. `!cancelled()` replaces that implicit rule, and the
+  # `result` checks put back the only part of it that was wanted: a failed or
+  # skipped gate or build must still stop the deploy.
+  deploy-web:
+    needs: [classify, gate, web-build]
+    if: >-
+      ${{ !cancelled()
+      && needs.gate.result == 'success'
+      && needs.web-build.result == 'success'
+      && needs.classify.outputs.deploy_web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      # The checkout, and the question of where `main` is now.
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: ${{ github.event.repository.name }}
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # A re-run replays its own commit, and publishing that after `main` has
+      # moved would put older bytes over newer ones. So a superseded run stops
+      # here, and it FAILS rather than skipping: the next push measures from
+      # the last green run, and this commit must still count as unpublished.
+      - name: Refuse to publish a commit main has moved past
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::error::main is at $head and this run is $GITHUB_SHA; nothing was published, and the run for $head publishes"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      # Publishes the artifact `web-build` produced. No second export: a
+      # rebuild here could serve bytes nothing in this run ever checked.
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
+        with:
+          # Ten minutes is the most this action accepts; a higher value is
+          # clamped. Past it the action goes red while Pages still publishes
+          # the artifact: a false failure the next push repairs by measuring
+          # from the last green run.
+          timeout: "600000"
+      # Not a 200: Pages answers 200 with the PREVIOUS deploy while the new one
+      # propagates. The shell must reference the entry bundle `web-build` named,
+      # the site must serve it, and it must declare the version `app.json`
+      # names. The shell is cached for ten minutes (`max-age=600`), so a stale
+      # one is asked again for that long before it counts as a failure.
+      - name: Verify production serves this build
+        env:
+          BASE: ${{ steps.deployment.outputs.page_url }}
+          ENTRY: ${{ needs.web-build.outputs.entry }}
+        run: node scripts/check-published.mjs web "$BASE" --entry "$ENTRY" --wait 600
+
+  # `mobile-build` runs only when the classifier deploys mobile, so its
+  # success is that decision.
+  deploy-mobile:
+    needs: [gate, mobile-build]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.mobile-build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: ${{ github.event.repository.name }}
+    steps:
+      # The same guard as `deploy-web`, for the same reason.
+      - name: Refuse to publish a commit main has moved past
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::error::main is at $head and this run is $GITHUB_SHA; nothing was published, and the run for $head publishes"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          # It runs `npm ci` beside `EXPO_TOKEN`: a package cache any workflow
+          # can write is code this job would run (zizmor cache-poisoning), as
+          # `release.yml` says for its own.
+          package-manager-cache: false
+      # Still needed with the bundles prebuilt: the CLI reads the app config,
+      # and the SDK version and runtime come from the installed `expo`.
+      - run: npm ci
+      # Expo Go uses the SDK runtime, so there is no binary lookup, build or
+      # Apple credential path.
+      #
+      # The CLI is not in the lockfile — `tests/repo/release-config.test.ts`
+      # records why — so npx resolves its whole tree at publish time. Two
+      # things keep that tree from choosing what runs beside EXPO_TOKEN:
+      # - It is installed HERE, in a step without the token, and the publish
+      #   step runs `npx --yes=false`, which refuses to install anything. Not
+      #   `--no`: npm does not know that flag and hands the command's own flags
+      #   to npm. `--ignore-scripts` skips the tree's install hooks (native
+      #   addon, postinstall), which the CLI does not need to start.
+      # - `npm_config_before` resolves every transitive range as it stood on a
+      #   fixed day, so nothing published after that day can enter, however it
+      #   was published. `.npmrc`'s `min-release-age` would do this on a rolling
+      #   window and does nothing on the npm Node 22 ships. Move the date with
+      #   `eas.json`'s CLI version: a date before a release refuses it outright,
+      #   which is the loud failure to want.
+      - name: Install the pinned EAS CLI without the credential
+        env:
+          npm_config_before: "2026-09-25"
+        run: npx --yes --ignore-scripts eas-cli@24.8.0 --version
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist-mobile-${{ github.run_id }}
+          path: ${{ runner.temp }}/dist-mobile
+      - name: Publish Expo Go preview update
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "::error::EXPO_TOKEN is not configured; the preview OTA was not published."
+            exit 1
+          fi
+          version=$(node -p "require('./app.json').expo.version")
+          # `--environment` is mandatory from SDK 55 on: without it the CLI
+          # refuses the publish rather than defaulting. `--skip-bundler`
+          # uploads `mobile-build`'s export, and `--platform all` takes the ios
+          # and android it holds. `--json` prints only the updates to stdout;
+          # the CLI's own log goes to stderr.
+          npx --yes=false eas-cli@24.8.0 update --branch preview --environment preview --platform all --skip-bundler --input-dir "$RUNNER_TEMP/dist-mobile" --message "$version $GITHUB_SHA" --non-interactive --json > "$RUNNER_TEMP/eas-update.json"
+      # One update per platform, one group, on the runtime Expo Go runs — and
+      # the group and update ids written onto the run's summary, which is the
+      # record a rollback republishes from.
+      - name: Verify and record the published update
+        run: node scripts/check-published.mjs ota "$RUNNER_TEMP/eas-update.json"

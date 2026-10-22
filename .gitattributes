@@ -1,0 +1,6 @@
+# Generated files, marked so tools stop treating them as written code. `-diff`
+# only where a diff was never going to be read; migration `.sql` keep theirs.
+src/db/migrations/*.sql linguist-generated=true
+src/db/migrations/migrations.js linguist-generated=true -diff
+src/db/migrations/meta/*.json linguist-generated=true -diff
+package-lock.json linguist-generated=true -diff

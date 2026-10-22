@@ -1,0 +1,6 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["public/sw.js", "babel.config.js", "vitest.mutation.config.mts"],
+  "ignore": ["src/db/expo-sqlite.server.js", "src/sync/realtime-absent.js", "supabase/functions/**"],
+  "ignoreDependencies": ["@stryker-mutator/vitest-files-runner", "babel-plugin-inline-import", "babel-preset-expo"]
+}

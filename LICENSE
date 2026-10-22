@@ -1,0 +1,45 @@
+Fiala — Proprietary Software License
+Copyright (c) 2026 Ömer Toprak Şavlı. All rights reserved.
+
+This software and its source code (the "Software") are the exclusive property
+of Ömer Toprak Şavlı (the "Author"), who is its sole developer and maintainer.
+The source is published in this repository for transparency, portfolio, and
+reference purposes only. Publishing the source does NOT place the Software in
+the public domain and does NOT grant any license to it.
+
+NO PERMISSION IS GRANTED, whether express or implied, to any person or entity
+to use, copy, modify, adapt, translate, merge, publish, distribute, sublicense,
+sell, rent, host, or create derivative works of the Software, in whole or in
+part, without the prior written permission of the Author.
+
+You MAY, without prior permission:
+  - View and read the source code within this repository.
+  - Fork the repository within GitHub solely as permitted by the GitHub Terms
+    of Service, for the purpose of viewing or submitting contributions back to
+    the Author.
+
+You MAY NOT, without the prior written permission of the Author:
+  - Run, deploy, or use the Software or any derivative for any purpose,
+    personal, educational, or commercial.
+  - Copy, reproduce, or redistribute the Software or any substantial part of it
+    outside this repository.
+  - Modify the Software or build derivative or competing works from it.
+  - Remove, alter, or obscure this notice or any copyright or attribution.
+
+All rights not expressly granted above are reserved by the Author. Any use
+outside the permissions stated here is unauthorized and infringes the Author's
+copyright. The Author reserves the right to pursue all available legal remedies
+against unauthorized use.
+
+To request a license or permission for any use, contact the Author.
+
+Third-party components (e.g. Expo, React Native, and other dependencies listed
+in package.json) remain governed by their own respective licenses; this notice
+applies only to the original code authored for Fiala.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

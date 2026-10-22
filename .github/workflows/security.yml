@@ -1,0 +1,142 @@
+# CodeQL, the workflow audit, and scheduled dependency auditing.
+#
+# CodeQL and registry advisories stay off the delivery path because either can
+# change without a source change. They run for security-relevant paths and on a
+# schedule, so a new finding remains visible without retroactively changing the
+# deterministic gate that certified an already-pushed commit.
+#
+# There are no pull requests (work lands directly on main), so the lockfile is
+# audited here rather than by a PR-only dependency review.
+name: security
+
+on:
+  push:
+    branches: [main]
+    # Everything CodeQL reads that ships or decides what installs: the root
+    # configs shape the bundle (`metro.config.js` swaps whole packages),
+    # `public/` and config plugins are served or built in, `.npmrc` sets the
+    # install policy the audits below check.
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".npmrc"
+      - "*.js"
+      - "*.mjs"
+      - "*.ts"
+      - "*.mts"
+      - "src/**"
+      - "scripts/**"
+      - "plugins/**"
+      - "public/**"
+      - "supabase/**"
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+  schedule:
+    # Weekly, so a newly published query pack still reaches a quiet repository.
+    - cron: "0 5 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: analyze javascript-typescript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          languages: javascript-typescript
+          # `security-and-quality` also reports maintainability queries, which
+          # would bury real findings in a single-developer repository.
+          queries: security-extended
+      # No build step: CodeQL extracts JS/TS directly from source. Running the
+      # Expo web export here would only duplicate the `web-build` job's work.
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: "/language:javascript-typescript"
+
+  # The workflows are the delivery path, and every push to `main` runs them with
+  # a deploy environment attached, so a template injection, an over-broad
+  # token or a poisoned cache in one of them is a way into production that no
+  # source scan reads. zizmor audits exactly that surface. The version is
+  # pinned so a new audit arrives as a decision, not as a red Monday; the token
+  # enables the online audits (known-vulnerable and impostor actions).
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx run zizmor==1.30.1 --format=github .github/
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      # No `npm ci`, and so no `cache: npm`: the audit resolves from
+      # package-lock.json alone.
+      # High and critical only, and every accepted advisory is named with its
+      # evidence in the script. A bare `npm audit --audit-level=high` reports
+      # every package carrying Metro's two build-chain `image-size`
+      # advisories as its own finding and goes permanently red; the two usual
+      # escapes — lowering the level, or `--omit=dev` — would each hide a real
+      # finding instead of explaining this one, because Expo and React Native
+      # declare their build tooling as ordinary dependencies.
+      #
+      # The same script also reviews what the registry audit cannot see at all:
+      # `xlsx` installs from the SheetJS CDN, so no advisory database has a
+      # record to match. It reads the publisher's own advisory page, which is
+      # why this job needs network access beyond the registry.
+      - run: node scripts/check-advisories.mjs
+
+  # Who built what is in the lockfile, as opposed to whether it is known-broken.
+  #
+  # `npm audit signatures` checks two different things: that every tarball
+  # matches the registry's own Sigstore signature, and — for the packages that
+  # publish it — the SLSA provenance attestation binding the tarball to the
+  # commit and workflow that produced it. A tampered or re-uploaded tarball
+  # fails the first; a package published from somewhere other than its own
+  # repository fails the second. Neither is something `npm audit` can see, and
+  # neither was checked anywhere before.
+  #
+  # It needs the tree on disk, which the advisory job deliberately does without,
+  # so it is its own job. `--ignore-scripts` is not caution theatre here: the
+  # whole point of this job is to inspect these packages, and running their
+  # install hooks first would mean executing the code under review.
+  signatures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # Node 22 ships npm 10, whose attestation verifier does not understand
+      # the current Playwright provenance bundle. Keep the verifier version
+      # explicit so the gate does not change with the runner image.
+      - run: npx --yes npm@12.0.2 audit signatures

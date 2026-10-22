@@ -1,0 +1,67 @@
+version: 2
+# Dependabot opens nothing: both ecosystems are capped at zero open pull
+# requests because delivery is commits to `main`. `security.yml` still reports
+# vulnerable versions. The ignore list records what must not move on its own,
+# and applies again if a limit is raised.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Istanbul
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 0
+    groups:
+      safe-npm-updates:
+        update-types: [minor, patch]
+    ignore:
+      # The Expo matrix moves only together, in a deliberate SDK upgrade.
+      # Dependabot reads React Native's pre-1.0 minors as ordinary, and
+      # reanimated and worklets desynchronise if bumped alone. All three levels
+      # stay listed: that keeps security updates eligible.
+      - dependency-name: "expo*"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "react*"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "babel-preset-expo"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "eslint-config-expo"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
+      # ESLint 10 and TypeScript 7 are blocked by the lint plugins Expo's config
+      # bundles: `eslint-plugin-react` calls an API ESLint 10 removed, and
+      # `@typescript-eslint` refuses TypeScript past 6.0. The typecheck already
+      # runs on 7 through the `typescript-7` alias.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # Vitest's major moves with the mutation gate: Stryker reruns a mutant's
+      # tests by name, so re-measure against scripts/stryker-vitest-files.mjs.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitest/coverage-v8"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@stryker-mutator/*"
+        update-types: ["version-update:semver-major"]
+      # `@types/node` follows the runtime `.nvmrc` pins, never the registry.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: Europe/Istanbul
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 0
+    groups:
+      github-actions:
+        patterns: ["*"]

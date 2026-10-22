@@ -1,0 +1,53 @@
+# Row-level security, asserted.
+#
+# `supabase/tests/*.sql` is the pgTAP suite, the only executable proof that
+# one account cannot read or write another's rows. The client's checks are
+# defence in depth; RLS is the authority.
+#
+# It runs against a local stack, never the linked project, so it holds no
+# credential and writes nowhere. Triggers: the migrations or tests changed,
+# once a week regardless (a Postgres image can change behaviour with no commit
+# of ours), or by hand. It deploys nothing; a red run is a bug report.
+name: database
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - ".github/workflows/database.yml"
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-${{ github.ref }}
+  cancel-in-progress: true
+
+# From npm, not `supabase/setup-cli`: this repository allows GitHub-owned
+# actions only, and a refused action fails before any log says why. Pinned, so
+# a scheduled run turns red only for a reason of ours.
+env:
+  SUPABASE: npx --yes supabase@2.118.0
+
+jobs:
+  rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Off: the dashboard, logs, image and edge runtimes, the pooler and the
+      # metadata API, none of which the suite reaches.
+      - run: $SUPABASE start -x studio,logflare,vector,imgproxy,edge-runtime,supavisor,postgres-meta
+      # Before the assertions, so a schema fault reads as one rather than as a
+      # page of failed tests. The `extensions` schema holds pgTAP's internals,
+      # which the linter cannot resolve; `public` is what this repository owns.
+      - run: $SUPABASE db lint --local --schema public --fail-on warning
+      - run: $SUPABASE test db --local
+      - if: always()
+        run: $SUPABASE stop --no-backup

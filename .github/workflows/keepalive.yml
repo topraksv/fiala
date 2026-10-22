@@ -1,0 +1,46 @@
+# Supabase's free plan pauses a project after about seven days without
+# database activity. This heartbeat writes AND reads every three days so the
+# project never pauses, even when nobody opens the app for a month.
+#
+# Only status codes are echoed. The response bodies are still asserted against
+# (the read must contain an "id"), but printing them would put PostgREST output
+# into a public Actions log for no diagnostic gain over the status code.
+#
+# GitHub disables a public repository's scheduled workflows after 60 days with
+# no repository activity; docs/RELEASE.md says what to do then.
+name: supabase-keepalive
+
+on:
+  schedule:
+    - cron: "0 6 */3 * *" # every 3 days at 06:00 UTC
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Upsert and read keep_alive row
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          write_status=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -X POST "$SUPABASE_URL/rest/v1/keep_alive?on_conflict=id" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "[{\"id\": 1, \"pinged_at\": \"$(date -u +%FT%TZ)\"}]")
+          echo "write: $write_status"
+          [ "$write_status" = "201" ] || [ "$write_status" = "200" ]
+          read_status=$(curl -sS -o /tmp/read.json -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/keep_alive?select=id,pinged_at&id=eq.1" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+          echo "read: $read_status"
+          [ "$read_status" = "200" ]
+          grep -q '"id"' /tmp/read.json

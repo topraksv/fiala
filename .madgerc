@@ -1,0 +1,3 @@
+{
+  "excludeRegExp": ["\\.(web|native|ios|android)\\.tsx?$"]
+}

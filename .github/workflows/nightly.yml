@@ -1,0 +1,91 @@
+# What no push asks: whether the live surfaces are what `main` says they
+# should be.
+#
+# It deploys nothing. A red nightly is a bug report, not a rollback trigger.
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  # Is the site serving what `main` says it should be?
+  #
+  # A green `main` and a stale production look the same from inside the
+  # repository: a failed gate on an app-bearing push followed by a test-only
+  # fix classifies light, skips the deploy, and leaves the old version live.
+  # The cheapest detector: fetch the shell, follow it to the entry bundle, and
+  # look for the version `app.json` claims.
+  published-version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      # The script `deploy-web` runs on publishing, asked of whatever is live
+      # without an expected bundle name.
+      - name: Compare the live bundle against app.json
+        env:
+          SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: node scripts/check-published.mjs web "$SITE"
+
+  # Has everything on `main` reached a surface?
+  #
+  # Only a green push run publishes, so while the newest one is behind `main`,
+  # what changed since is on neither surface — and the version check above sees
+  # that only when a release moved the version, never for the Expo Go update.
+  # A push or a re-run of the head's run closes one (docs/RELEASE.md).
+  main-published:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare main with the newest green push run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          answer=$(node scripts/check-published.mjs green --head "$head")
+          green=$(sed -n 's/^sha=//p' <<<"$answer")
+          open=$(sed -n 's/^open=//p' <<<"$answer")
+          if [ "$green" != "$head" ] && [ "$open" = "0" ]; then
+            echo "::error::main is at $head and the newest green push run is at ${green:-nothing}; what changed since is on no surface"
+            exit 1
+          fi
+
+  # Can anyone open what `deploy-mobile` publishes?
+  #
+  # Expo Go runs one SDK — the one the stores carry — and an update for any
+  # other SDK still publishes green and opens on no up-to-date phone. Expo's
+  # newest listed SDK is not the answer, because a preview is listed before any
+  # store carries it; the script reads the newest RELEASED one.
+  expo-go-reach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Compare this project's SDK with the stores' Expo Go
+        run: node scripts/check-published.mjs expo-go

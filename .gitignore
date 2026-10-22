@@ -1,0 +1,61 @@
+# Dependencies and logs
+node_modules/
+*.log
+
+# Local environment and secrets. Only EXPO_PUBLIC_* values may ever reach the
+# bundle, and they reach it by design; everything else stays on this machine.
+.env*
+!.env.example
+*.jks
+*.key
+*.mobileprovision
+*.p8
+*.p12
+*.pem
+
+# Expo, native and build output (native folders are generated: CNG)
+.expo/
+/android/
+/ios/
+.kotlin/
+/dist/
+expo-env.d.ts
+*.tsbuildinfo
+
+# Test and analysis output
+/coverage/
+/dist-e2e/
+/test-results/
+/playwright-report/
+/reports/
+/.stryker-tmp/
+.eslintcache
+
+# Supabase CLI state
+supabase/.temp/
+
+# Editor and OS debris
+.DS_Store
+.idea/
+*.orig
+*.orig.*
+*.rej
+*.swp
+
+# How this repository is worked on, rather than what it builds.
+#
+# The instruction files, the agent surface, the collaboration memory and the
+# design and architecture notes are the owner's working material. They stay on
+# disk, where every session still reads them, and out of the published tree.
+# `<repo>-private` carries them: `.claude/scripts/push-both.sh` stages this same
+# working tree into `.private.git` with these paths forced in, minus the
+# machine-local state listed in that script.
+/.agents/
+/.claude/
+/AGENTS.md
+/CLAUDE.md
+/docs/
+/skills-lock.json
+
+# The private mirror lives in its own git directory beside this one.
+/.private.git/
