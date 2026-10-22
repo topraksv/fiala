@@ -91,23 +91,23 @@
       "measuredDate": "2026-10-22"
     },
     "src/db/migrate.ts": {
-      "score": 79.63,
-      "killed": 43,
+      "score": 72.22,
+      "killed": 39,
       "timeout": 0,
-      "survived": 9,
+      "survived": 13,
       "noCoverage": 2,
-      "cost": 1506,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
+      "cost": 2135,
+      "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
     },
     "src/db/mutations.ts": {
-      "score": 94.38,
-      "killed": 149,
-      "timeout": 2,
-      "survived": 8,
+      "score": 93.13,
+      "killed": 146,
+      "timeout": 3,
+      "survived": 10,
       "noCoverage": 1,
-      "cost": 3687,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
+      "cost": 4484,
+      "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
     },
     "src/domain/dates.ts": {
@@ -201,23 +201,23 @@
       "measuredDate": "2026-10-22"
     },
     "src/sync/engine.ts": {
-      "score": 76.99,
-      "killed": 331,
-      "timeout": 7,
-      "survived": 97,
+      "score": 76.08,
+      "killed": 326,
+      "timeout": 8,
+      "survived": 101,
       "noCoverage": 4,
-      "cost": 8842,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
+      "cost": 9206,
+      "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
     },
     "src/sync/merge-policy.ts": {
-      "score": 92.86,
-      "killed": 122,
-      "timeout": 8,
-      "survived": 10,
+      "score": 92.14,
+      "killed": 120,
+      "timeout": 9,
+      "survived": 11,
       "noCoverage": 0,
-      "cost": 3010,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
+      "cost": 2878,
+      "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
     },
     "src/sync/rows.ts": {
@@ -241,13 +241,13 @@
       "measuredDate": "2026-10-22"
     },
     "src/sync/session-epoch.ts": {
-      "score": 64.29,
-      "killed": 27,
+      "score": 61.9,
+      "killed": 26,
       "timeout": 0,
-      "survived": 15,
+      "survived": 16,
       "noCoverage": 0,
-      "cost": 1000,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
+      "cost": 1151,
+      "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
     },
     "src/sync/status.ts": {
