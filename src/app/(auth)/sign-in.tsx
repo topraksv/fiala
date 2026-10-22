@@ -1,10 +1,6 @@
 import { memo, useRef, useState, type ReactNode, type Ref } from "react";
-import { StyleSheet, Text, View, useWindowDimensions, type TextInput } from "react-native";
-import ClipboardList from "lucide-react-native/icons/clipboard-list";
+import { Text, View, useWindowDimensions, type TextInput } from "react-native";
 import CloudOff from "lucide-react-native/icons/cloud-off";
-import Refrigerator from "lucide-react-native/icons/refrigerator";
-import ShoppingCart from "lucide-react-native/icons/shopping-cart";
-import type { LucideIcon } from "lucide-react-native";
 import { useRouter } from "expo-router";
 
 import { isValidNewPassword, useSession } from "../../auth/session";
@@ -16,7 +12,7 @@ import { Press } from "../../ui/press";
 import { LegalConsentControl, LegalNoticeSheet } from "../../ui/legal-notice";
 import { BrandMark } from "../../ui/brand";
 import { shouldSplitAuthHero } from "../../ui/responsive";
-import { alpha, authHero, contentWidth, controlSize, font, maxFontScale, radius, spacing, type, useTheme } from "../../ui/theme";
+import { authHero, contentWidth, controlSize, font, radius, spacing, type, useTheme } from "../../ui/theme";
 
 /** `confirm` and `reset` take the code the e-mail of `signUp` and `forgot` carries. */
 type Mode = "signIn" | "signUp" | "forgot" | "confirm" | "reset";
@@ -35,98 +31,6 @@ const MODE: Record<
 
 const passwordReady = (kind: "current" | "new" | null, password: string) => (kind === "new" ? isValidNewPassword(password) : kind === null || password !== "");
 const codeReady = (code: string) => new RegExp(`^\\d{${CODE_LENGTH}}$`).test(code);
-
-function JourneyNode({ icon: Icon, label, active = false }: { icon: LucideIcon; label: string; active?: boolean }) {
-  const { palette } = useTheme();
-  return (
-    <View style={{ flex: 1, alignItems: "center", minWidth: 0 }}>
-      <View
-        style={{
-          width: authHero.node,
-          height: authHero.node,
-          borderRadius: radius.xl,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: active ? palette.primary : palette.surfaceAlt,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: active ? palette.primaryStrong : palette.border,
-        }}
-      >
-        <Icon accessible={false} size={authHero.nodeIcon} strokeWidth={authHero.nodeStroke} color={active ? palette.onPrimary : palette.textSecondary} />
-      </View>
-      {/* Capped: beside a disc that does not scale, the largest text size breaks words mid-way. */}
-      <Text
-        maxFontSizeMultiplier={maxFontScale.measuredBox}
-        style={[type.small, { color: active ? palette.accentText : palette.textSecondary, fontFamily: font.semibold, textAlign: "center", marginTop: spacing.xs }]}
-      >
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-/** The picture under the greeting: three steps of a household's shopping. */
-function AuthJourneyArtwork({ compact }: { compact: boolean }) {
-  const { palette } = useTheme();
-  const { bigBlob, smallBlob, link, bar } = authHero;
-  const tones = [palette.primary, palette.secondary, palette.tertiary];
-  const joint = <View style={{ flex: link.flex, height: StyleSheet.hairlineWidth, backgroundColor: palette.border, marginTop: link.top }} />;
-  return (
-    <View
-      accessible
-      accessibilityRole="image"
-      accessibilityLabel={`${tr.auth.journeyWrite}, ${tr.auth.journeyShop}, ${tr.auth.journeyRemember}`}
-      style={{
-        minHeight: compact ? authHero.art.height : authHero.art.heightWide,
-        borderRadius: radius.lg,
-        backgroundColor: palette.surfaceAlt,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border + alpha.controlEdge,
-        overflow: "hidden",
-        justifyContent: "center",
-        padding: compact ? spacing.md : spacing.xl,
-      }}
-    >
-      <View
-        style={{
-          position: "absolute",
-          ...(compact ? bigBlob.compact : bigBlob.wide),
-          borderRadius: radius.full,
-          backgroundColor: palette.primarySoft,
-          opacity: bigBlob.opacity,
-        }}
-      />
-      <View
-        style={{
-          position: "absolute",
-          ...(compact ? smallBlob.compact : smallBlob.wide),
-          borderRadius: radius.full,
-          backgroundColor: palette.secondarySoft,
-          opacity: smallBlob.opacity,
-        }}
-      />
-      <View style={{ flexDirection: "row", alignItems: "flex-start", width: "100%" }}>
-        <JourneyNode icon={ClipboardList} label={tr.auth.journeyWrite} active />
-        {joint}
-        <JourneyNode icon={ShoppingCart} label={tr.auth.journeyShop} />
-        {joint}
-        <JourneyNode icon={Refrigerator} label={tr.auth.journeyRemember} />
-      </View>
-      {compact ? null : (
-        <View style={{ marginTop: spacing.xl, gap: spacing.sm }}>
-          {authHero.bars.map((share, at) => (
-            <View key={share} style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-              <View style={{ width: bar.dot, height: bar.dot, borderRadius: radius.full, backgroundColor: tones[at] }} />
-              <View style={{ flex: 1, height: bar.height, borderRadius: radius.full, backgroundColor: palette.surfaceStrong + alpha.tileEdge }}>
-                <View style={{ width: `${share * 100}%`, height: bar.height, borderRadius: radius.full, backgroundColor: tones[at] }} />
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
 
 /** Inline links rather than stacked ghost buttons, which pushed the form past a phone's fold; each
  *  keeps the 44-point target. */
@@ -204,7 +108,7 @@ function AuthColumn({ wide, share, children }: { wide: boolean; share: number; c
 }
 
 /** The greeting beside the form, or above it on a phone; memoised, since every keystroke re-renders its parent. */
-const AuthGreeting = memo(function AuthGreeting({ wide, artwork }: { wide: boolean; artwork: boolean }) {
+const AuthGreeting = memo(function AuthGreeting({ wide }: { wide: boolean }) {
   const { palette } = useTheme();
   return (
     <AuthColumn wide={wide} share={1.08}>
@@ -230,7 +134,6 @@ const AuthGreeting = memo(function AuthGreeting({ wide, artwork }: { wide: boole
       <Body muted style={{ marginBottom: spacing.lg, maxWidth: authHero.bodyMaxWidth, lineHeight: authHero.bodyLine }}>{tr.auth.welcomeBody}</Body>
       {/* Decoration, and the first thing to go when the form grows: a phone
           has to reach the button without scrolling. */}
-      {artwork ? <AuthJourneyArtwork compact={!wide} /> : null}
     </AuthColumn>
   );
 });
@@ -391,7 +294,7 @@ export default function SignInScreen() {
       {/* Top-aligned, not centred: centring re-laid the column on every change
           in the card's height, and the mark drifted with each mode. */}
       <AuthSplit wide={wide}>
-        <AuthGreeting wide={wide} artwork={wide || mode === "signIn"} />
+        <AuthGreeting wide={wide} />
         {/* One skeleton for every mode, so switching does not redraw a card of each size. */}
         <AuthColumn wide={wide} share={0.92}>
           <Card>

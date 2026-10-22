@@ -1,7 +1,7 @@
 {
   "name": "Fiala",
   "short_name": "Fiala",
-  "description": "Evin alışveriş listesi",
+  "description": "Fiala kuruluyor",
   "lang": "tr",
   "start_url": "/fiala/",
   "scope": "/fiala/",

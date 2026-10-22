@@ -117,10 +117,6 @@ export const tr = {
     toSignUp: "Yeni hesap oluştur",
     toSignIn: "Zaten hesabım var, giriş yap",
     offlineNote: "Verilerin cihazında saklanır, internet yokken de çalışır.",
-    /** The three-step picture under the greeting, told for a household's shopping. */
-    journeyWrite: "Yaz",
-    journeyShop: "Al",
-    journeyRemember: "Hatırla",
     forgotPassword: "Şifremi unuttum",
     backToSignIn: "Giriş ekranına dön",
     confirmTitle: "E-postanı doğrula",

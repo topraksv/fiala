@@ -519,21 +519,6 @@ export const sectionMark = { width: 3, height: 18, radius: 2 } as const;
 export const toggleSize = { width: 46, height: 28, padding: 3, glyph: 11, glyphInset: 7 } as const;
 
 /**
- * A photo opened full screen (`src/ui/photo-viewer.native.tsx`). Black in every
- * scheme, as a photo is looked at on black: a themed scrim would tint it, and
- * a translucent one would show the page through it. The zoom runs from the
- * whole photo to `maxZoom`; a double tap goes to `doubleTapZoom` and back.
- */
-export const photoViewer = {
-  backdrop: "#000000",
-  ink: "#FFFFFF",
-  chip: "rgba(255, 255, 255, 0.16)",
-  minZoom: 1,
-  maxZoom: 4,
-  doubleTapZoom: 2.5,
-} as const;
-
-/**
  * The mark drawing itself (`src/ui/brand.tsx`), on the brand kit's timeline:
  * the G is traced, then its leaf opens from the stem, swinging in by `leafTurn`
  * degrees. Milliseconds from the first frame.
@@ -628,16 +613,6 @@ export const authHero = {
   titleScale: 1.3,
   bodyMaxWidth: 470,
   bodyLine: 22,
-  art: { height: 132, heightWide: 286 },
-  bigBlob: { compact: { width: 180, height: 180, top: -105, right: -65 }, wide: { width: 320, height: 320, top: -175, right: -120 }, opacity: 0.68 },
-  smallBlob: { compact: { width: 95, height: 95, bottom: -55, left: -25 }, wide: { width: 170, height: 170, bottom: -90, left: -45 }, opacity: 0.72 },
-  node: 46,
-  nodeIcon: 21,
-  nodeStroke: 1.8,
-  /** The joining line, a hair below the node's centre. */
-  link: { flex: 0.52, top: 23 },
-  bars: [0.72, 0.48, 0.86],
-  bar: { height: 6, dot: 7 },
   noteIcon: 14,
   /** The reset page's round mark over its heading, and the glyph in it. */
   resultMark: 56,
