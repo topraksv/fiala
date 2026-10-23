@@ -19,8 +19,11 @@ import { pendingOutboxCount, resetLocalWorkspace } from "../db/mutations";
 import { useSyncStatus } from "../sync/status";
 import { tr } from "../i18n/tr";
 import { kv } from "../services/kv";
+import { forgetReminderPreferences } from "../services/reminder-preferences";
+import { cancelReminders } from "../services/reminders";
 import { flushOutbox, startSyncSession, stopSyncSession } from "../sync/engine";
 import { createRecoveryClient, getSupabase, subscribeSupabaseAuthEvents } from "../sync/supabase";
+import { purgeOwnPhotos } from "../sync/photos";
 import { friendlyAuthError } from "./auth-errors";
 import { deviceName } from "../domain/logins";
 import { deviceId, loadPreviousLogin, recordSuccessfulLogin, startLoginHistory } from "./login-history";
@@ -104,6 +107,8 @@ async function ensureWorkspaceFor(userId: string): Promise<string | null> {
       // Another account's rows may exist nowhere else yet. The one exception
       // is a deleted account's: nobody is left to send them to.
       if (owner !== WIPE_PENDING && (await pendingOutboxCount()) > 0) return tr.auth.errOtherAccountPending;
+      await cancelReminders().catch(ignore);
+      await forgetReminderPreferences().catch(ignore);
       await wipeWorkspace();
     } catch {
       return tr.auth.errWorkspaceReset;
@@ -163,6 +168,7 @@ async function closeEndedSession(): Promise<void> {
   useSession.setState(signedOut);
   await stopSyncSession();
   await kv.remove(LAST_USER_KEY).catch(ignore);
+  await cancelReminders().catch(ignore);
   // A count that fails is not a zero.
   if ((await pendingOutboxCount().catch(ignore)) === 0) await wipeWorkspace().then(forgetAccount, ignore);
 }
@@ -212,6 +218,12 @@ interface SessionStore {
   /** Checks the two codes `changeEmail` mailed; a code already accepted is not asked again. */
   confirmEmailChange: (newEmail: string, codes: EmailChangeCodes) => Promise<EmailChangeAnswer>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
+  /**
+   * Ends the account's session on every other device (`docs/TASKS.md` F1.30);
+   * this one stays. Each finds out at its next token refresh, within the hour,
+   * and empties itself as any session Supabase ended does.
+   */
+  signOutOthers: () => Promise<string | null>;
 }
 
 /** The code mailed to the address now on the account, and the one mailed to the address it moves to. */
@@ -412,7 +424,7 @@ export const useSession = create<SessionStore>((set, get) => ({
       if (userId) await flushOutbox(userId);
       if (!options?.force && (await pendingOutboxCount()) > 0) return SIGN_OUT_PENDING_CHANGES;
       await stopSyncSession();
-      const wiped = await wipeWorkspace().then(() => true, () => false);
+      const [, wiped] = await Promise.all([cancelReminders().catch(ignore), wipeWorkspace().then(() => true, () => false)]);
       if (!wiped) {
         if (userId) startSyncSession(userId);
         return tr.auth.errWorkspaceReset;
@@ -441,11 +453,13 @@ export const useSession = create<SessionStore>((set, get) => ({
       const supabase = getSupabase();
       const userId = get().userId;
       if (!supabase || !userId) return tr.auth.errNotConfigured;
-      // Nothing is sent while the account is taken apart; if the server keeps
-      // it, the device keeps everything and sync resumes.
+      // Nothing is sent while the account is taken apart. Its photos go first,
+      // since nothing cascades to Storage; then the account, and if the server
+      // keeps it, the device keeps everything and sync sends the photos back.
       await stopSyncSession();
       let error: { message: string } | null;
       try {
+        await purgeOwnPhotos();
         ({ error } = await supabase.rpc("delete_own_account"));
       } catch (failure) {
         error = { message: failure instanceof Error ? failure.message : String(failure) };
@@ -457,7 +471,11 @@ export const useSession = create<SessionStore>((set, get) => ({
       }
       // The identity is gone, so every device's session goes with it: the one
       // global revoke. A round trip beside a local wipe that does not need it.
-      const [, wiped] = await Promise.all([endAuthSession(supabase, "global"), wipeWorkspace().then(() => true, () => false)]);
+      const [, , wiped] = await Promise.all([
+        cancelReminders().catch(ignore),
+        endAuthSession(supabase, "global"),
+        wipeWorkspace().then(() => true, () => false),
+      ]);
       if (!wiped) {
         set(signedOut);
         // The marker replaces the owner rather than following its removal: a
@@ -543,6 +561,13 @@ export const useSession = create<SessionStore>((set, get) => ({
     if (!supabase) return tr.auth.errNotConfigured;
     if (!isValidNewPassword(newPassword)) return tr.auth.errWeakPassword;
     const { error } = await supabase.auth.updateUser({ current_password: currentPassword, password: newPassword });
+    return error ? friendlyAuthError(error.message) : null;
+  },
+
+  signOutOthers: async () => {
+    const supabase = getSupabase();
+    if (!supabase) return tr.auth.errNotConfigured;
+    const { error } = await supabase.auth.signOut({ scope: "others" });
     return error ? friendlyAuthError(error.message) : null;
   },
 }));

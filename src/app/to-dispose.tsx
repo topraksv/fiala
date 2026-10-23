@@ -1,0 +1,74 @@
+/**
+ * The boxes to get rid of (`docs/TASKS.md` F1.23): expired and still at home.
+ * Leaving marks a box disposed rather than deleting it, so its record and
+ * history stay; the undo bar takes it back.
+ */
+
+import PackageCheck from "lucide-react-native/icons/package-check";
+import PackageX from "lucide-react-native/icons/package-x";
+
+import { editBoxes, type CabinetBox, type CabinetProduct } from "../data/cabinet";
+import { useCabinet } from "../data/hooks";
+import { SOON_DAYS, expiryState, formatDay, isEmpty, localDay } from "../domain/boxes";
+import { undoRows } from "../db/mutations";
+import { tr } from "../i18n/tr";
+import { Body, Button, Card, EmptyState, IconButton, ListRow, ReadFailed, Screen } from "../ui/components";
+import { appError } from "../ui/dialog";
+import { spacing, useTheme } from "../ui/theme";
+import { showUndo } from "../ui/undo";
+
+type Held = { product: CabinetProduct; box: CabinetBox };
+
+export default function ToDispose() {
+  const { palette } = useTheme();
+  const cabinet = useCabinet();
+  const today = localDay();
+  // As Durum counts them: an empty box asks for nothing.
+  const expired: Held[] = cabinet.data.flatMap((product) =>
+    product.boxes
+      .filter((box) => box.disposition == null && !isEmpty(box) && expiryState(box.expiresOn, today, box.soonDays ?? SOON_DAYS) === "expired")
+      .map((box) => ({ product, box })),
+  );
+  const nameOf = ({ product, box }: Held) => tr.common.boxName(product, box);
+
+  const dispose = async (held: readonly Held[]) => {
+    try {
+      const written = await editBoxes(held.map(({ box }) => box.id), { disposition: "disposed" });
+      if (written) showUndo(tr.toDispose.doneNotice(held.length), () => undoRows(written));
+    } catch {
+      await appError(tr.errors.saveFailed);
+    }
+  };
+
+  if (cabinet.status === "error") {
+    return (
+      <Screen back="/" title={tr.toDispose.title}>
+        <ReadFailed queries={[cabinet]} />
+      </Screen>
+    );
+  }
+  return (
+    <Screen back="/" title={tr.toDispose.title}>
+      {cabinet.status === "loading" ? null : expired.length === 0 ? (
+        <EmptyState icon={PackageCheck} title={tr.toDispose.emptyTitle} hint={tr.toDispose.emptyHint} />
+      ) : (
+        <>
+          <Body muted style={{ marginBottom: spacing.md }}>{tr.toDispose.hint}</Body>
+          <Card rows>
+            {expired.map((held) => (
+              <ListRow
+                key={held.box.id}
+                icon={PackageX}
+                iconColor={palette.error}
+                title={nameOf(held)}
+                subtitle={tr.cabinet.expires(formatDay(held.box.expiresOn!))}
+                right={<IconButton icon={PackageCheck} label={tr.toDispose.done(nameOf(held))} onPress={() => void dispose([held])} />}
+              />
+            ))}
+          </Card>
+          <Button label={tr.toDispose.all} variant="secondary" onPress={() => void dispose(expired)} />
+        </>
+      )}
+    </Screen>
+  );
+}

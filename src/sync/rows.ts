@@ -11,14 +11,28 @@ import { SYNCED_TABLES, type SyncedTableName } from "../db/schema";
 import { isUuidShaped } from "./merge-policy";
 
 /**
- * Every synced row is keyed by its person as well as its id on the server
- * (`00000000000003_sync.sql`): a row carries no `user_id` on the device, which
- * holds one account's workspace, and gets it here.
+ * Keyed by their person as well as the id on the server (migration 1): such a
+ * row carries no `user_id` on the device, which holds one account's rows, and
+ * gets it here. Every other table is a cabinet, a membership of one, or a
+ * cabinet's row (migrations 2 and 4): the device writes the cabinet itself,
+ * and RLS decides whose it may be.
  */
-export const keyColumns = (): readonly string[] => ["user_id", "id"];
+const PERSONAL_TABLES: ReadonlySet<SyncedTableName> = new Set(["settings"]);
+/** A cabinet and a membership are keyed by their id alone (migration 4): neither id is minted from anything another account knows. */
+const ID_KEYED: ReadonlySet<SyncedTableName> = new Set(["cabinets", "cabinet_members"]);
+
+/**
+ * The columns a row's server key is made of. A product's id may be a hash of
+ * its cabinet and GTIN, so anyone who knows the cabinet could mint it
+ * elsewhere; keyed by the cabinet too, that copy is another row.
+ */
+export function keyColumns(table: SyncedTableName): readonly string[] {
+  if (ID_KEYED.has(table)) return ["id"];
+  return PERSONAL_TABLES.has(table) ? ["user_id", "id"] : ["cabinet_id", "id"];
+}
 
 interface Column {
-  kind: "text" | "integer";
+  kind: "text" | "integer" | "boolean";
   notNull: boolean;
   /** What an insert naming the column not, or a migration adding it, gives a row. */
   empty: unknown;
@@ -31,7 +45,7 @@ const COLUMNS = new Map<SyncedTableName, Map<string, Column>>(
       Object.values(getTableColumns(SYNCED_TABLES[table])).map((column) => [
         column.name,
         {
-          kind: column.columnType === "SQLiteInteger" ? "integer" : "text",
+          kind: column.columnType === "SQLiteBoolean" ? "boolean" : column.columnType === "SQLiteInteger" ? "integer" : "text",
           notNull: column.notNull,
           empty: column.default ?? null,
         },
@@ -43,7 +57,13 @@ const COLUMNS = new Map<SyncedTableName, Map<string, Column>>(
 function fits(column: Column, value: unknown): boolean {
   if (value == null) return !column.notNull;
   if (column.kind === "text") return typeof value === "string";
-  return Number.isSafeInteger(value);
+  if (column.kind === "integer") return Number.isSafeInteger(value);
+  return value === true || value === false || value === 0 || value === 1;
+}
+
+/** SQLite stores a boolean as 0 or 1; PostgREST takes it as one. */
+function asSent(column: Column, value: unknown): unknown {
+  return column.kind === "boolean" && value != null ? Boolean(value) : value;
 }
 
 /**
@@ -74,11 +94,12 @@ export function toServerRow(
     }
     const value = payload[name];
     if (!fits(column, value)) return null;
-    if (unpulled.has(name) && (value ?? null) === column.empty) continue;
-    out[name] = value;
+    const sent = asSent(column, value);
+    if (unpulled.has(name) && (sent ?? null) === column.empty) continue;
+    out[name] = sent;
   }
   if (Number(out.tombstone_version) < 0) return null;
-  out.user_id = owner;
+  if (PERSONAL_TABLES.has(table)) out.user_id = owner;
   return out;
 }
 
@@ -97,15 +118,15 @@ function canonicalTimestamp(value: unknown): unknown {
  * id becomes the pull's keyset cursor, so its shape is checked.
  */
 export function toLocalRow(table: SyncedTableName, raw: Record<string, unknown>, owner: string): Record<string, unknown> {
-  if (raw.user_id !== owner) throw new Error(`pull ${table}: another owner's row`);
+  if (PERSONAL_TABLES.has(table) && raw.user_id !== owner) throw new Error(`pull ${table}: another owner's row`);
   if (!isUuidShaped(raw.id) || typeof raw.updated_at !== "string") throw new Error(`pull ${table}: invalid server row`);
   const out: Record<string, unknown> = {};
   for (const [name, column] of COLUMNS.get(table)!) {
     if (!(name in raw)) continue;
     // Every `_at` column is a timestamptz on the server.
     const value = name.endsWith("_at") ? canonicalTimestamp(raw[name]) : raw[name];
-    if (!fits(column, value)) throw new Error(`pull ${table}: invalid ${name}`);
-    out[name] = value;
+    if (!fits(column, value) || (column.kind === "boolean" && typeof value === "number")) throw new Error(`pull ${table}: invalid ${name}`);
+    out[name] = typeof value === "boolean" ? Number(value) : value;
   }
   if (Number(out.tombstone_version) < 0) throw new Error(`pull ${table}: invalid tombstone_version`);
   return out;

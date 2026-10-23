@@ -40,7 +40,7 @@ export function clearUndo(): void {
  * Offer to take back what just happened. The caller plays the event's own
  * haptic; the bar plays none, or a delete would be felt twice.
  */
-function showUndo(message: string, onUndo: () => Promise<unknown>, tone: UndoOffer["tone"] = "success"): void {
+export function showUndo(message: string, onUndo: () => Promise<unknown>, tone: UndoOffer["tone"] = "success"): void {
   present({ message, onUndo, tone });
 }
 

@@ -170,7 +170,7 @@ export interface RowsWritten {
 }
 
 /** `writeRows`, keeping each row as the transaction found it, for `revertRows`. */
-async function writeUndoable(build: () => Promise<readonly RowWrite[]>): Promise<RowsWritten> {
+export async function writeUndoable(build: () => Promise<readonly RowWrite[]>): Promise<RowsWritten> {
   let written!: RowsWritten;
   await writeRows(async () => {
     const writes = await build();
@@ -252,6 +252,6 @@ export async function resetLocalWorkspace(): Promise<void> {
   const sqlite = await getSqliteAsync();
   // One script rather than a statement per table: on the web every call is a
   // round trip to the SQLite worker, and a sign-out waited on each of them.
-  const tables = [...Object.keys(SYNCED_TABLES), "outbox", "sync_dead_letters", "sync_state"];
+  const tables = [...Object.keys(SYNCED_TABLES), "photos", "outbox", "sync_dead_letters", "sync_state"];
   await withTransaction(() => sqlite.execAsync(tables.map((table) => `DELETE FROM ${table};`).join("\n")));
 }

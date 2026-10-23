@@ -8,13 +8,21 @@
  * Every picture reaches the page as data, so `img-src` names no host.
  */
 
-/** The one HTTPS Supabase origin a build may reach, or null. */
+/**
+ * The one Supabase origin a build may reach, or null: a hosted project by
+ * HTTPS, or the local stack `supabase start` serves on this machine, for
+ * trying a build before its migrations reach the project. A release never
+ * carries the local one: CI's `bundle:check` refuses any URL but a hosted
+ * project's.
+ */
 export function trustedSupabaseOrigin(raw: string | undefined): string | null {
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    const plain = !url.username && !url.password && !url.port && url.pathname === "/" && !url.search && !url.hash;
-    return url.protocol === "https:" && plain && /^[a-z0-9-]+\.supabase\.co$/i.test(url.hostname) ? url.origin : null;
+    const plain = !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash;
+    const hosted = url.protocol === "https:" && !url.port && /^[a-z0-9-]+\.supabase\.co$/i.test(url.hostname);
+    const local = url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port !== "";
+    return plain && (hosted || local) ? url.origin : null;
   } catch {
     return null;
   }

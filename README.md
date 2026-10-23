@@ -2,11 +2,11 @@
 
 # Fiala
 
-### Kuruluyor — fikir, ad ve özellikler henüz kararlaştırılmadı.
+### Evin dijital ilaç dolabı — yapım aşamasında.
 
-*A local-first Expo + Supabase app shell: sign-in, account security, settings,
-sync, feedback and a launch mark, with no feature of its own yet. iOS, Android
-and the web from one codebase.*
+*A local-first Expo + Supabase medicine cabinet for a household: the boxes at
+home, whose they are, their expiry and stock. iOS, Android and the web from one
+codebase.*
 
 [![Expo SDK 57](https://img.shields.io/badge/Expo-SDK%2057-0F0F0D?logo=expo&logoColor=white)](https://docs.expo.dev/versions/v57.0.0/)
 [![Node 22](https://img.shields.io/badge/Node-22-0F0F0D?logo=nodedotjs&logoColor=5FA04E)](#geliştirici-kurulumu)
@@ -18,8 +18,9 @@ and the web from one codebase.*
 
 ## Şu an ne var?
 
-Boş bir şablon: açılır, giriş yapılır, ayarlar bulutla eşitlenir, açılış işareti
-çizilir. Ürün özelliği yok; ana sekme "kuruluyor" der.
+Uygulamanın kabuğu ve dört sekmesi: Durum, Dolabım, Rehber, Ayarlar. Açılır,
+giriş yapılır, ayarlar bulutla eşitlenir, açılış işareti çizilir; ilaç ekleme ve
+dolap sırayla geliyor.
 
 - **Önce cihaz.** Her yazma cihazdaki SQLite veritabanına iner — veri satırı ve
   outbox kaydı tek transaction içinde. Bağlantı gelince outbox Supabase'e gider.

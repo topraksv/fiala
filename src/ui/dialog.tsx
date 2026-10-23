@@ -74,7 +74,7 @@ interface PromptRequest {
 }
 
 /** What the field holds, which decides its keyboard and what the phone may fill in. */
-type PromptKind = "text" | "email" | "password" | "new-password";
+type PromptKind = "text" | "amount" | "day" | "email" | "password" | "new-password";
 
 const usePromptStore = create<RequestQueue<PromptRequest>>(() => emptyRequestQueue<PromptRequest>());
 let promptId = 0;
@@ -389,6 +389,8 @@ function PromptBody({ request }: { request: PromptRequest }) {
 
 function fieldFor(kind: PromptKind) {
   if (kind === "text") return {};
+  if (kind === "amount") return { keyboardType: "decimal-pad" } as const;
+  if (kind === "day") return { keyboardType: "numbers-and-punctuation" } as const;
   if (kind === "email") return { autoCapitalize: "none", autoCorrect: false, autoComplete: "email", keyboardType: "email-address", textContentType: "emailAddress" } as const;
   const fresh = kind === "new-password";
   return {

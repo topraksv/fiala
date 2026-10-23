@@ -4,11 +4,12 @@
  * failure is shown in the status store and retried with backoff; a late
  * answer from a session that has ended is dropped by the epoch.
  *
- * Beyond that (`docs/ARCHITECTURE.md`): a row is keyed by its person on the
- * server; a batch the server refuses is sent row by row, so one bad row waits
- * aside instead of stopping every other; a row this device made afresh over a
- * delete it never saw is added again rather than lost; and the pull reaches
- * back a few seconds past its cursor.
+ * Beyond that (`docs/ARCHITECTURE.md`): a personal row is keyed by its person
+ * on the server, and a medicine row by its cabinet; a batch the server refuses
+ * is sent row by row, so one bad row waits aside instead of stopping every
+ * other; a row this device made afresh over a delete it never saw is added
+ * again rather than lost; the pull reaches back a few seconds past its
+ * cursor; and photos travel beside the rows, before the row naming one.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -33,9 +34,11 @@ import {
   type PullCursor,
   type RejectedOutboxEvent,
 } from "./merge-policy";
+import { fetchMissingPhotos, PHOTO_TABLES, sendPendingPhotos, sweepUnnamedPhotos } from "./photos";
 import { keyColumns, toLocalRow, toServerRow } from "./rows";
 import { SessionEpoch, SessionEpochCancelledError, type SessionEpochToken } from "./session-epoch";
 import { classifyRefreshFailure, completedSyncState, isNetworkFailure, useSyncStatus, type RefreshOutcome } from "./status";
+import { forgetOffers, listOffers, useOffers } from "./sharing";
 import { getSupabase } from "./supabase";
 
 const TABLES = Object.keys(SYNCED_TABLES) as SyncedTableName[];
@@ -100,7 +103,7 @@ async function atServerGeneration(
   token: SessionEpochToken,
 ): Promise<Record<string, unknown> | null> {
   let query = supabase.from(table).select("tombstone_version, deleted_at");
-  for (const column of keyColumns()) query = query.eq(column, String(row[column]));
+  for (const column of keyColumns(table)) query = query.eq(column, String(row[column]));
   const { data, error } = await query.limit(1).abortSignal(token.signal);
   if (error) throw new Error(`push ${table}: ${error.message}`);
   const held = (data as { tombstone_version: number; deleted_at: string | null }[] | null)?.[0];
@@ -135,12 +138,17 @@ async function assertSessionIs(supabase: SupabaseClient, userId: string): Promis
   if (data.session?.user.id !== userId) throw new SessionMismatchError("session: not this account's");
 }
 
-/** The server's copy, `created_at` included (`isAddedAgain` needs the new one). */
+/**
+ * The server's copy, `created_at` included (`isAddedAgain` needs the new one). A row from another cabinet
+ * under an id held here is someone's copy of that id (a product's is a hash of cabinet and GTIN) and never
+ * moves the local row, as Gital's lists keep theirs.
+ */
 async function upsertLocal(sqlite: LocalDatabase, table: SyncedTableName, row: Record<string, unknown>): Promise<void> {
   const keys = Object.keys(row);
+  const sameKey = keyColumns(table).includes("cabinet_id") ? ` WHERE ${table}.cabinet_id = excluded.cabinet_id` : "";
   await sqlite.runAsync(
     `INSERT INTO ${table} (${keys.join(", ")}) VALUES (${keys.map(() => "?").join(", ")})
-     ON CONFLICT(id) DO UPDATE SET ${keys.filter((key) => key !== "id").map((key) => `${key} = excluded.${key}`).join(", ")}`,
+     ON CONFLICT(id) DO UPDATE SET ${keys.filter((key) => key !== "id").map((key) => `${key} = excluded.${key}`).join(", ")}${sameKey}`,
     keys.map((key) => row[key] as string | number | null),
   );
 }
@@ -185,7 +193,7 @@ async function sendRows(
   rows: Record<string, unknown>[],
   token: SessionEpochToken,
 ): Promise<{ acknowledged: Acknowledged[]; refused: RejectedOutboxEvent[] }> {
-  const onConflict = keyColumns().join(",");
+  const onConflict = keyColumns(table).join(",");
   const send = (batch: Record<string, unknown>[]) =>
     supabase.from(table).upsert(batch, { onConflict }).select("*").abortSignal(token.signal);
   const acknowledged: Acknowledged[] = [];
@@ -220,6 +228,10 @@ async function pushTable(supabase: SupabaseClient, table: SyncedTableName, owner
       [table],
     );
     if (events.length === 0) return;
+    // After the batch is read, not once before the push: a row naming a photo
+    // must never reach a device before the photo can, and one written while
+    // this run was pushing an earlier table would otherwise go up without it.
+    if (PHOTO_TABLES.has(table)) await sendPendingPhotos(supabase, token.signal);
     const { latestByRow, rejected } = classifyOutboxBatch(events);
     if (!unpulledColumns) {
       const marked = await sqlite.getFirstAsync<{ last_pulled_at: string }>("SELECT last_pulled_at FROM sync_state WHERE table_name = ?", [UNPULLED + table]);
@@ -293,11 +305,16 @@ interface ServerHead {
 }
 
 /**
- * Each table's keyset head in one request; `null` pulls every table. A table
- * the answer leaves out is pulled too: the function's list is a second copy of
- * `SYNCED_TABLES`, and a copy can fall behind.
+ * Each table's keyset head in one request, and a hash of the offers waiting
+ * on this person (`offers`, migration 6; `undefined` from a server before
+ * it); `null` pulls every table. A table the answer leaves out is pulled too:
+ * the function's list is a second copy of `SYNCED_TABLES`, and a copy can
+ * fall behind.
  */
-async function fetchServerHeads(supabase: SupabaseClient, token: SessionEpochToken): Promise<Map<string, PullCursor | null> | null> {
+async function fetchServerHeads(
+  supabase: SupabaseClient,
+  token: SessionEpochToken,
+): Promise<{ heads: Map<string, PullCursor | null>; offers: string | null | undefined } | null> {
   if (changeProbeUnavailable) return null;
   const { data, error } = await supabase.rpc("sync_cursors").abortSignal(token.signal);
   if (error) {
@@ -306,11 +323,26 @@ async function fetchServerHeads(supabase: SupabaseClient, token: SessionEpochTok
     return null;
   }
   const heads = new Map<string, PullCursor | null>();
+  let offers: string | null | undefined;
   for (const row of (data ?? []) as ServerHead[]) {
-    if (row.max_updated_at == null && row.max_id == null) heads.set(row.table_name, null);
+    if (row.table_name === "offers") offers = isUuidShaped(row.max_id) ? row.max_id : null;
+    else if (row.max_updated_at == null && row.max_id == null) heads.set(row.table_name, null);
     else if (typeof row.max_updated_at === "string" && isUuidShaped(row.max_id)) heads.set(row.table_name, { ts: row.max_updated_at, id: row.max_id });
   }
-  return heads;
+  return { heads, offers };
+}
+
+/**
+ * The offers waiting on this person, asked for only when the probe's hash of
+ * them moves. One that does not arrive keeps the old hash, and the next sync
+ * asks again; the sync itself goes on, as it owes nothing to them.
+ */
+async function followOffers(hash: string | null | undefined, userId: string, token: SessionEpochToken): Promise<void> {
+  if (hash === undefined || hash === useOffers.getState().seen) return;
+  const answer = hash === null ? { offers: [] } : await listOffers(token.signal);
+  assertActive(token);
+  if ("refused" in answer) return;
+  useOffers.setState({ seen: hash, received: answer.offers.filter((offer) => offer.to === userId) });
 }
 
 async function localMergeState(
@@ -329,9 +361,10 @@ async function localMergeState(
   return state;
 }
 
-/** One page of `table` after `cursor`. */
-function fetchPage(supabase: SupabaseClient, table: SyncedTableName, cursor: PullCursor, first: boolean, token: SessionEpochToken) {
-  const query = supabase.from(table).select("*").order("updated_at", { ascending: true }).order("id", { ascending: true }).limit(PULL_PAGE);
+/** One page of `table` after `cursor`; with `cabinet`, that cabinet's rows from the start, moving no cursor. */
+function fetchPage(supabase: SupabaseClient, table: SyncedTableName, cursor: PullCursor, first: boolean, token: SessionEpochToken, cabinet?: string) {
+  let query = supabase.from(table).select("*").order("updated_at", { ascending: true }).order("id", { ascending: true }).limit(PULL_PAGE);
+  if (cabinet) query = query.eq(table === "cabinets" ? "id" : "cabinet_id", cabinet);
   const page = first
     ? query.gte("updated_at", new Date(Date.parse(cursor.ts) - PULL_OVERLAP_MS).toISOString())
     : query.or(`updated_at.gt.${cursor.ts},and(updated_at.eq.${cursor.ts},id.gt.${cursor.id})`);
@@ -348,11 +381,25 @@ type Page = ReturnType<typeof fetchPage>;
  * cannot reject unobserved, since PostgREST without `throwOnError` answers a
  * failed or aborted fetch with `{ error }`.
  */
-function prefetch(tables: readonly SyncedTableName[], cursorFor: (table: SyncedTableName) => PullCursor, supabase: SupabaseClient, token: SessionEpochToken): Map<SyncedTableName, Page> {
-  return new Map(tables.map((table) => [table, fetchPage(supabase, table, cursorFor(table), true, token)] as const));
+function prefetch(
+  tables: readonly SyncedTableName[],
+  cursorFor: (table: SyncedTableName) => PullCursor,
+  supabase: SupabaseClient,
+  token: SessionEpochToken,
+  cabinet?: string,
+): Map<SyncedTableName, Page> {
+  return new Map(tables.map((table) => [table, fetchPage(supabase, table, cursorFor(table), true, token, cabinet)] as const));
 }
 
-async function pullTable(supabase: SupabaseClient, table: SyncedTableName, from: PullCursor, owner: string, token: SessionEpochToken, firstPage: Page): Promise<void> {
+async function pullTable(
+  supabase: SupabaseClient,
+  table: SyncedTableName,
+  from: PullCursor,
+  owner: string,
+  token: SessionEpochToken,
+  firstPage: Page,
+  cabinet?: string,
+): Promise<void> {
   const sqlite = await getSqliteAsync();
   let cursor = from;
   let next = firstPage;
@@ -382,20 +429,23 @@ async function pullTable(supabase: SupabaseClient, table: SyncedTableName, from:
       }
       const last = (data as Record<string, unknown>[]).at(-1)!;
       cursor = { ts: cursorInstant(String(last.updated_at)), id: String(last.id) };
+      if (cabinet) return;
       await sqlite.runAsync(
         `INSERT INTO sync_state (table_name, last_pulled_at) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET last_pulled_at = excluded.last_pulled_at`,
         [table, formatPullCursor(cursor)],
       );
     });
     if (data.length < PULL_PAGE) return;
-    next = fetchPage(supabase, table, cursor, false, token);
+    next = fetchPage(supabase, table, cursor, false, token, cabinet);
   }
 }
 
 async function pullAll(supabase: SupabaseClient, userId: string, token: SessionEpochToken): Promise<void> {
   const sqlite = await getSqliteAsync();
   assertActive(token);
-  const heads = await fetchServerHeads(supabase, token);
+  const probe = await fetchServerHeads(supabase, token);
+  await followOffers(probe?.offers, userId, token);
+  const heads = probe?.heads;
   const stored = await sqlite.getAllAsync<{ table_name: string; last_pulled_at: string }>("SELECT table_name, last_pulled_at FROM sync_state");
   const cursors = new Map(stored.map((row) => [row.table_name, parsePullCursor(row.last_pulled_at)]));
   const cursorFor = (table: SyncedTableName) => cursors.get(table) ?? parsePullCursor(null);
@@ -412,6 +462,83 @@ async function pullAll(supabase: SupabaseClient, userId: string, token: SessionE
     "DELETE FROM sync_state WHERE table_name LIKE ? AND substr(table_name, ?) NOT IN (SELECT table_name FROM outbox UNION SELECT table_name FROM sync_dead_letters)",
     [`${UNPULLED}%`, UNPULLED.length + 1],
   );
+}
+
+/** The tables a cabinet's membership opens, parents first, with the column that names the cabinet. */
+const CABINET_SCOPED = TABLES.filter((table) => table !== "settings").map((table) => [table, table === "cabinets" ? "id" : "cabinet_id"] as const);
+const FETCHED = "cabinet:";
+const FROM_START = parsePullCursor(null);
+
+/**
+ * Joining and leaving, Gital's `followMemberships`. A cabinet shared with
+ * this person has rows older than every cursor here, so a membership seen for
+ * the first time fetches its cabinet whole, once per device. A membership
+ * ended — left, or removed by the owner — drops the cabinet from the device,
+ * with whatever was still to send for it, since the server will take none of it.
+ */
+async function followMemberships(supabase: SupabaseClient, userId: string, token: SessionEpochToken): Promise<void> {
+  const sqlite = await getSqliteAsync();
+  if (membershipsSweptFor !== userId) {
+    await sweepMemberships(sqlite, supabase, userId, token);
+    membershipsSweptFor = userId;
+  }
+  const mine = await sqlite.getAllAsync<{ cabinet_id: string; deleted_at: string | null }>(
+    "SELECT cabinet_id, deleted_at FROM cabinet_members WHERE user_id = ? AND role <> 'owner'",
+    [userId],
+  );
+  const fetched = new Set(
+    (await sqlite.getAllAsync<{ table_name: string }>("SELECT table_name FROM sync_state WHERE table_name LIKE ?", [`${FETCHED}%`])).map((row) => row.table_name),
+  );
+  for (const { cabinet_id: cabinet, deleted_at: left } of mine) {
+    assertActive(token);
+    if (left) {
+      await forgetCabinet(sqlite, cabinet);
+    } else if (!fetched.has(FETCHED + cabinet)) {
+      const tables = CABINET_SCOPED.map(([table]) => table);
+      const pages = prefetch(tables, () => FROM_START, supabase, token, cabinet);
+      for (const table of tables) await pullTable(supabase, table, FROM_START, userId, token, pages.get(table)!, cabinet);
+      await sqlite.runAsync("INSERT OR REPLACE INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [FETCHED + cabinet, nowIso()]);
+    }
+  }
+}
+
+/** Once a session: the sweep costs a request that the poll need not repeat. */
+let membershipsSweptFor: string | null = null;
+const SWEEP_LIMIT = 1000;
+
+/**
+ * An account deleted takes its cabinets and memberships with it by cascade:
+ * hard deletes, which no keyset pull ever sees. So the memberships the server
+ * still holds are asked for whole, and one this device holds that is gone from
+ * it goes here too — the person's own drops its cabinet, as a removal does;
+ * another's leaves the members list.
+ */
+async function sweepMemberships(sqlite: LocalDatabase, supabase: SupabaseClient, userId: string, token: SessionEpochToken): Promise<void> {
+  const { data, error } = await supabase.from("cabinet_members").select("id").limit(SWEEP_LIMIT).abortSignal(token.signal);
+  if (error) throw new Error(`memberships: ${error.message}`);
+  const held = new Set((data as { id: string }[]).map((row) => row.id));
+  // A page that may not be all of them proves nothing gone.
+  if (held.size >= SWEEP_LIMIT) return;
+  assertActive(token);
+  const local = await sqlite.getAllAsync<{ id: string; cabinet_id: string; user_id: string; role: string }>("SELECT id, cabinet_id, user_id, role FROM cabinet_members");
+  for (const row of local) {
+    if (held.has(row.id)) continue;
+    if (row.user_id === userId && row.role !== "owner") await forgetCabinet(sqlite, row.cabinet_id);
+    else await sqlite.runAsync("DELETE FROM cabinet_members WHERE id = ?", [row.id]);
+  }
+}
+
+/** A bare DELETE, as Gital's `dropList`: these rows are gone from the server's view of this person, not deleted by them. */
+function forgetCabinet(sqlite: LocalDatabase, cabinet: string): Promise<void> {
+  return withTransaction(async () => {
+    for (const [table, column] of CABINET_SCOPED) {
+      await sqlite.runAsync(`DELETE FROM ${table} WHERE ${column} = ?`, [cabinet]);
+      for (const queue of ["outbox", "sync_dead_letters"]) {
+        await sqlite.runAsync(`DELETE FROM ${queue} WHERE table_name = ? AND json_extract(payload, '$.${column}') = ?`, [table, cabinet]);
+      }
+    }
+    await sqlite.runAsync("DELETE FROM sync_state WHERE table_name = ?", [FETCHED + cabinet]);
+  });
 }
 
 const RETRIED = "retried:";
@@ -455,6 +582,9 @@ async function runSync(userId: string, token: SessionEpochToken, allowRefresh: b
     await retryAsideAfterUpdate();
     await pushOutbox(supabase, userId, token);
     await pullAll(supabase, userId, token);
+    await followMemberships(supabase, userId, token);
+    await fetchMissingPhotos(supabase, token.signal);
+    await sweepUnnamedPhotos(supabase, token.signal);
     assertActive(token);
     const state = completedSyncState(await deadLetterCount());
     retryAttempt = 0;
@@ -500,12 +630,14 @@ async function runSync(userId: string, token: SessionEpochToken, allowRefresh: b
 export function startSyncSession(userId: string): void {
   sessionEpoch.start(userId);
   changeProbeUnavailable = false;
+  membershipsSweptFor = null;
   clearScheduledSync();
 }
 
 /** End the session's sync and wait until its run has let go of the database. */
 export async function stopSyncSession(): Promise<void> {
   sessionEpoch.stop();
+  forgetOffers();
   clearScheduledSync();
   await Promise.allSettled([inFlight]);
 }

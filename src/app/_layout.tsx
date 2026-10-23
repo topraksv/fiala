@@ -1,24 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppState, Platform, View, useColorScheme } from "react-native";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import Head from "expo-router/head";
 import { StatusBar } from "expo-status-bar";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import * as SystemUI from "expo-system-ui";
 import DatabaseZap from "lucide-react-native/icons/database-zap";
+import LockKeyhole from "lucide-react-native/icons/lock-keyhole";
 
 import { useSession } from "../auth/session";
 import { takeDatabaseRebuilt } from "../db/client";
 import { migrateDb } from "../db/migrate";
 import { tr } from "../i18n/tr";
 import { kv } from "../services/kv";
+import { followReminderTaps, remindersAvailable, replanReminders } from "../services/reminders";
 import { useAccountFrozen } from "../data/hooks";
 import { syncNow } from "../sync/engine";
 import { Button, EmptyState } from "../ui/components";
 import { appError, OverlaySlot } from "../ui/dialog";
 import { FOCUS_PROPERTY } from "../ui/focus-ring";
 import { KeyboardSafeRoot } from "../ui/keyboard-safe";
+import { useAppLock, useNavigationAcrossLock } from "../ui/app-lock";
 import { useDatabaseHandoff } from "../ui/database-handoff";
 import { Launch } from "../ui/launch";
 import { APPEARANCE_KEYS, isThemePreference, PALETTES, resolvePaletteId, ThemeContext } from "../ui/theme";
@@ -202,23 +205,29 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
   const operation = useSession((s) => s.operation);
   const signedIn = userId != null;
   const frozen = useAccountFrozen(signedIn);
+  const { locked: lockedHere, unlock } = useAppLock(ready, userId);
+  // The device that freezes signs out; its own freezing is not a lock.
+  const locked = frozen === true && operation !== "freeze";
+  useNavigationAcrossLock(lockedHere, lockedHere === false && !locked, userId);
   useEffect(() => {
     // A launch that cannot decide opens on sign-in rather than on nothing.
     useSession.getState().bootstrap().catch(() => useSession.setState({ ready: true }));
   }, []);
   // An undo offered to one account must not run against the next one's data.
   useEffect(() => clearUndo(), [userId]);
-  const settled = ready && !(signedIn && frozen == null);
+  const settled = ready && !(signedIn && frozen == null) && lockedHere != null;
   // The launch screen stays over this gap, so it never shows as a blank frame.
   useEffect(() => {
     if (settled) onSettled();
   }, [settled, onSettled]);
   if (!settled) return null;
-  // The device that freezes signs out; its own freezing is not a lock.
-  const locked = frozen === true && operation !== "freeze";
   return (
     <>
-      {locked ? (
+      {lockedHere ? (
+        <View style={{ flex: 1, backgroundColor: background }}>
+          <EmptyState icon={LockKeyhole} title={tr.lock.title} hint={tr.lock.prompt} action={<Button label={tr.lock.button} onPress={() => void unlock()} />} />
+        </View>
+      ) : locked ? (
         <FrozenGate />
       ) : (
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: background } }}>
@@ -227,6 +236,19 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
             <Stack.Screen name="sync-issues" />
             <Stack.Screen name="data-reset" />
             <Stack.Screen name="account-security" />
+            <Stack.Screen name="add-box" />
+            <Stack.Screen name="box/[id]" />
+            <Stack.Screen name="boxes" />
+            <Stack.Screen name="import" />
+            <Stack.Screen name="product/[id]" />
+            <Stack.Screen name="names/[table]" />
+            <Stack.Screen name="person/[id]" />
+            <Stack.Screen name="to-buy" />
+            <Stack.Screen name="to-dispose" />
+            <Stack.Screen name="notices" />
+            <Stack.Screen name="status-cards" />
+            <Stack.Screen name="profile" />
+            <Stack.Screen name="help" />
           </Stack.Protected>
           <Stack.Protected guard={!signedIn}>
             <Stack.Screen name="(auth)/sign-in" />
@@ -237,7 +259,13 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
         </Stack>
       )}
       {/* Kept while locked: the reopening may come from another device. */}
-      {signedIn ? <SyncRunner userId={userId} /> : null}
+      {signedIn ? (
+        <>
+          <SyncRunner userId={userId} />
+          <ReminderPlanner />
+          {locked || lockedHere ? null : <ReminderTaps />}
+        </>
+      ) : null}
       {operation ? <OperationWait operation={operation} /> : null}
     </>
   );
@@ -259,5 +287,23 @@ function SyncRunner({ userId }: { userId: string }) {
       clearInterval(poll);
     };
   }, [userId]);
+  return null;
+}
+
+/** At opening and each time the app leaves the screen, when what it holds may have changed. Gital's. */
+function ReminderPlanner() {
+  useEffect(() => {
+    if (!remindersAvailable) return;
+    const plan = () => void replanReminders().catch(() => {});
+    plan();
+    const subscription = AppState.addEventListener("change", (state) => state === "background" && plan());
+    return () => subscription.remove();
+  }, []);
+  return null;
+}
+
+/** Not while the account is frozen or the app locked: a tap must not open a screen behind the lock. */
+function ReminderTaps() {
+  useEffect(() => (remindersAvailable ? followReminderTaps((route) => router.push(route)) : undefined), []);
   return null;
 }

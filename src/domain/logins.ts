@@ -73,6 +73,16 @@ export function lastLogin(
   return remembered && (!latest || remembered > latest.at) ? { at: remembered, device: null, here: false } : latest;
 }
 
+/** Every device the account signed in on, newest sign-in first, this one's being its present session (F1.30). */
+export function deviceLogins(settings: readonly { key: string; value: string }[], thisDevice: string | null): { at: string; device: string | null; here: boolean }[] {
+  return settings
+    .flatMap(({ key, value }) => {
+      const login = key.startsWith(LOGIN_KEY_PREFIX) ? parse(value) : null;
+      return login ? [{ at: login.at, device: login.device, here: key === LOGIN_KEY_PREFIX + thisDevice }] : [];
+    })
+    .sort((a, b) => b.at.localeCompare(a.at));
+}
+
 /** What the account screen names a device by: the browser on the web, the phone in the app. */
 export function deviceName({ os, isPad, model, agent }: { os: string; isPad: boolean; model?: string; agent?: string }): string | null {
   if (os === "web") return agent ? deviceFromAgent(agent) : null;

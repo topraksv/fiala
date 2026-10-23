@@ -3,12 +3,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { sourceFiles } from "../source-corpus";
+import { PERSON_COLORS } from "../../src/db/schema";
 import {
   composite,
   DEFAULT_PALETTE_ID,
   INTERACTION_ALPHA,
   PALETTES,
   motion,
+  personColors,
   navigationInset,
   radius,
   resolvePaletteId,
@@ -159,6 +161,17 @@ describe.each(schemes)("%s", (_, p) => {
   });
 });
 
+describe("a person's colour", () => {
+  it("is drawn for every colour a person may be given, and its initial reads on it in every family", () => {
+    for (const scheme of ["light", "dark"] as const) {
+      expect(Object.keys(personColors[scheme]), scheme).toEqual([...PERSON_COLORS]);
+      for (const [name, fill] of Object.entries(personColors[scheme])) {
+        for (const family of Object.values(PALETTES)) expect(contrast(fill, family[scheme].surface), `${scheme} ${name}`).toBeGreaterThanOrEqual(TEXT);
+      }
+    }
+  });
+});
+
 describe("scales", () => {
   it("spacing sits on the 4-point grid and only grows", () => {
     const steps = Object.values(spacing);
@@ -199,8 +212,9 @@ describe("the floating tab bar", () => {
 describe("theme.ts holds the only literals", () => {
   const sources = sourceFiles("src", { atLeast: 60 }).filter((path) => path !== join("src", "ui", "theme.ts"));
 
-  // A quoted pair of hex digits is an alpha channel appended to a palette hex.
-  const COLOUR = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(|"[0-9a-f]{2}"/i;
+  // A pair of hex digits appended to a palette colour is an alpha channel; a
+  // quoted pair alone is not, or every "01" and "20" in a parser would be one.
+  const COLOUR = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(|\+\s*"[0-9a-f]{2}"|\}[0-9a-f]{2}`/i;
   // `\w*` before Width and Height, so a stroke or border weight is a size too.
   const RAW_SIZE =
     /\b(?:margin|padding|gap|top|bottom|left|right|\w*[wW]idth|\w*[hH]eight|size|fontSize|lineHeight|borderRadius|duration)\w*\s*[:=]\s*\{?-?(?:[1-9]|0\.\d)/;

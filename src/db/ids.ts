@@ -20,4 +20,8 @@ export async function deterministicId(naturalKey: string): Promise<string> {
 export const naturalKeys = {
   /** One row per setting, so two devices writing it meet one row. The server keys it by person too. */
   setting: (key: string) => `setting:${key}`,
+  /** One product per GTIN in a cabinet, so a second box of it, added offline elsewhere, joins the first. */
+  product: (cabinetId: string, gtin: string) => `product:${cabinetId}:${gtin}`,
+  /** One row per tag on a product, so tagging it twice, on two devices, is one tag. */
+  productTag: (productId: string, tagId: string) => `product-tag:${productId}:${tagId}`,
 };

@@ -4,7 +4,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LOGIN_KEY_PREFIX, deviceFromAgent, deviceName, lastLogin } from "../../src/domain/logins";
+import { LOGIN_KEY_PREFIX, deviceFromAgent, deviceLogins, deviceName, lastLogin } from "../../src/domain/logins";
+
+const row = (device: string, login: unknown) => ({ key: LOGIN_KEY_PREFIX + device, value: JSON.stringify(login) });
 
 describe("deviceFromAgent", () => {
   it.each([
@@ -31,7 +33,6 @@ describe("deviceFromAgent", () => {
 });
 
 describe("lastLogin", () => {
-  const row = (device: string, login: unknown) => ({ key: LOGIN_KEY_PREFIX + device, value: JSON.stringify(login) });
 
   it("is another device's latest sign-in when it came after this device's last", () => {
     const settings = [
@@ -71,6 +72,25 @@ describe("lastLogin", () => {
     expect(lastLogin(settings, "here", "2026-09-25T08:00:00Z")).toEqual({ at: "2026-09-25T08:00:00Z", device: "iPhone", here: false });
     expect(lastLogin(settings, null, "2026-09-20T08:00:00Z"), "before the device id is read").toEqual({ at: "2026-09-20T08:00:00Z", device: null, here: false });
     expect(lastLogin(settings, null)).toBeNull();
+  });
+});
+
+describe("deviceLogins", () => {
+  it("lists every device's own sign-in, newest first, this one's present session among them, and skips what it cannot read", () => {
+    const settings = [
+      row("phone", { at: "2026-09-25T08:00:00Z", previous: null, device: "iPhone" }),
+      row("here", { at: "2026-09-26T08:00:00Z", previous: "2026-09-20T08:00:00Z", device: "Mac · Safari" }),
+      row("old", { at: "2026-09-01T08:00:00Z", previous: null, device: null }),
+      { key: LOGIN_KEY_PREFIX + "broken", value: "{" },
+      { key: "account_frozen", value: "false" },
+    ];
+    expect(deviceLogins(settings, "here")).toEqual([
+      { at: "2026-09-26T08:00:00Z", device: "Mac · Safari", here: true },
+      { at: "2026-09-25T08:00:00Z", device: "iPhone", here: false },
+      { at: "2026-09-01T08:00:00Z", device: null, here: false },
+    ]);
+    expect(deviceLogins(settings, null).some((login) => login.here), "before this device's id is read").toBe(false);
+    expect(deviceLogins([], "here")).toEqual([]);
   });
 });
 

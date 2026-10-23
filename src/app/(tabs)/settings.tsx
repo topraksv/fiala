@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
-import { Text, View, useWindowDimensions } from "react-native";
+import { Platform, Text, View, useWindowDimensions } from "react-native";
 import { router } from "expo-router";
+import * as LocalAuthentication from "expo-local-authentication";
+import Bell from "lucide-react-native/icons/bell";
+import CircleQuestionMark from "lucide-react-native/icons/circle-question-mark";
+import CircleUserRound from "lucide-react-native/icons/circle-user-round";
 import CloudOff from "lucide-react-native/icons/cloud-off";
 import CloudUpload from "lucide-react-native/icons/cloud-upload";
 import KeyRound from "lucide-react-native/icons/key-round";
@@ -8,20 +12,31 @@ import LogOut from "lucide-react-native/icons/log-out";
 import MessageSquare from "lucide-react-native/icons/message-square";
 import ShieldCheck from "lucide-react-native/icons/shield-check";
 import Check from "lucide-react-native/icons/check";
+import EyeOff from "lucide-react-native/icons/eye-off";
 import Monitor from "lucide-react-native/icons/monitor";
 import Moon from "lucide-react-native/icons/moon";
+import ScanFace from "lucide-react-native/icons/scan-face";
 import Sun from "lucide-react-native/icons/sun";
 
 import { useSession } from "../../auth/session";
+import { usePeople, useSettings } from "../../data/hooks";
+import { profileChoice } from "../../data/settings";
 import { partOfDay } from "../../domain/dates";
 import { tr } from "../../i18n/tr";
+import { REMINDER_DEFAULTS, REMINDER_HOURS, readReminderPreferences, saveReminderHour, saveReminderMuted, saveReminderNames, type ReminderPreferences } from "../../services/reminder-preferences";
+import { REMINDER_GROUPS, type ReminderGroup } from "../../domain/reminders";
+import { disableReminders, enableReminders, remindersAvailable, replanReminders } from "../../services/reminders";
+import { kv } from "../../services/kv";
 import { syncNow } from "../../sync/engine";
 import { useSyncStatus } from "../../sync/status";
 import { isSupabaseConfigured } from "../../sync/supabase";
+import { LOCK_KEY, lockName } from "../../ui/app-lock";
 import { BrandMark } from "../../ui/brand";
-import { Body, Button, Card, ChoiceTile, ListRow, Screen, SectionHeader } from "../../ui/components";
+import { PersonMark } from "../../ui/named-choices";
+import { Body, Button, Card, ChoiceTile, ListRow, Screen, SectionHeader, ToggleRow } from "../../ui/components";
+import { appError } from "../../ui/dialog";
 import { shouldPairTiles } from "../../ui/responsive";
-import { alpha, appearanceTile, authHero, borderWidth, circle, density, PALETTES, radius, spacing, type, useTheme, type Palette, type PaletteId, type ThemePreference } from "../../ui/theme";
+import { alpha, appearanceTile, authHero, borderWidth, circle, controlSize, density, PALETTES, radius, spacing, type, useTheme, type Palette, type PaletteId, type ThemePreference } from "../../ui/theme";
 import { radioGroupKeys } from "../../ui/keys";
 import { leaveAccount } from "../../ui/operation-wait";
 import { setAppearance } from "../../ui/theme-transition";
@@ -44,9 +59,15 @@ export default function SettingsScreen() {
   const { palette, scheme, paletteId, preference } = useTheme();
   const { width } = useWindowDimensions();
   const stacked = !shouldPairTiles(width);
+  const settings = useSettings();
+  const people = usePeople();
+  const me = people.data.find((person) => person.id === profileChoice(settings.data, "me", people.data));
   return (
     <Screen title={tr.tabs.settings} width="workspace">
-      <Greeting />
+      <Greeting me={me} />
+      <Card rows>
+        <ListRow icon={CircleUserRound} title={tr.profile.title} subtitle={tr.profile.row} chevron onPress={() => router.push("/profile")} />
+      </Card>
       <SectionHeader>{tr.settings.appSection}</SectionHeader>
       <Card>
         <Body style={{ marginBottom: spacing.sm }}>{tr.settings.theme}</Body>
@@ -78,6 +99,7 @@ export default function SettingsScreen() {
           ))}
         </View>
       </Card>
+      {remindersAvailable ? <Reminders /> : null}
       {isSupabaseConfigured ? (
         <>
           <SectionHeader>{tr.settings.syncSection}</SectionHeader>
@@ -92,16 +114,18 @@ export default function SettingsScreen() {
           <SectionHeader>{tr.account.section}</SectionHeader>
           <Card rows>
             <ListRow icon={KeyRound} title={tr.account.security} subtitle={tr.account.securityDesc} chevron onPress={() => router.push("/account-security")} />
+            {Platform.OS === "web" ? null : <AppLock />}
           </Card>
           <Card rows>
             <ListRow icon={LogOut} title={tr.account.signOut} subtitle={tr.account.signOutDescription} chevron onPress={() => void leaveAccount()} />
           </Card>
         </>
       ) : null}
-      {/* Last: the one row here that changes nothing, and a person looking for
-          it is looking for the bottom of the page. */}
-      <SectionHeader>{tr.feedback.title}</SectionHeader>
+      {/* Last: the rows here that change nothing, and a person looking for
+          them is looking for the bottom of the page. */}
+      <SectionHeader>{tr.help.title}</SectionHeader>
       <Card rows>
+        <ListRow icon={CircleQuestionMark} title={tr.help.title} subtitle={tr.help.row} chevron onPress={() => router.push("/help")} />
         <ListRow icon={MessageSquare} title={tr.feedback.title} subtitle={tr.feedback.settingsDesc} chevron onPress={() => router.push("/feedback")} />
       </Card>
       <Body muted style={{ fontSize: type.small.fontSize, textAlign: "center", marginTop: spacing.md }}>{tr.settings.footer}</Body>
@@ -109,9 +133,109 @@ export default function SettingsScreen() {
   );
 }
 
+/**
+ * The phone's own reminders (`docs/TASKS.md` F1.24, F1.29): the permission is
+ * asked from the first switch alone; the rest shows once it is on.
+ */
+function Reminders() {
+  const [preferences, setPreferences] = useState<ReminderPreferences | null>(null);
+  useEffect(() => void readReminderPreferences().then(setPreferences, () => setPreferences(REMINDER_DEFAULTS)), []);
+  if (!preferences) return null;
+  const { on, hour, muted } = preferences;
+  // Drawn at once, and put back to what the phone ended with: refused, or failed.
+  const turn = (next: boolean) => {
+    setPreferences({ ...preferences, on: next });
+    (next ? enableReminders() : disableReminders().then(() => false)).then(
+      (allowed) => {
+        if (next && !allowed) {
+          setPreferences({ ...preferences, on: false });
+          void appError(tr.reminders.denied);
+        }
+      },
+      () => {
+        void readReminderPreferences().then(setPreferences, () => {});
+        void appError(tr.errors.saveFailed);
+      },
+    );
+  };
+  const change = (next: Partial<ReminderPreferences>, save: Promise<void>) => {
+    setPreferences({ ...preferences, ...next });
+    save.then(replanReminders).catch(() => appError(tr.errors.saveFailed));
+  };
+  const mute = (group: ReminderGroup) => (said: boolean) => {
+    const next = said ? muted.filter((each) => each !== group) : [...muted, group];
+    change({ muted: next }, saveReminderMuted(next));
+  };
+  return (
+    <>
+      <SectionHeader>{tr.reminders.title}</SectionHeader>
+      <Card rows>
+        <ToggleRow icon={Bell} title={tr.reminders.title} subtitle={tr.reminders.hint} value={on} onValueChange={turn} />
+        {on ? (
+          <>
+            <ToggleRow icon={EyeOff} title={tr.reminders.names} subtitle={tr.reminders.namesHint} value={preferences.names} onValueChange={(names) => change({ names }, saveReminderNames(names))} />
+            {(Object.keys(REMINDER_GROUPS) as ReminderGroup[]).map((group) => (
+              <ToggleRow key={group} title={tr.reminders.groups[group]} value={!muted.includes(group)} onValueChange={mute(group)} />
+            ))}
+          </>
+        ) : null}
+      </Card>
+      {on ? (
+        <Card>
+          <Body style={{ marginBottom: spacing.sm }}>{tr.reminders.hour}</Body>
+          <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.reminders.hour} style={{ flexDirection: "row", gap: spacing.sm }}>
+            {REMINDER_HOURS.map((offered) => (
+              <ChoiceTile key={offered} label={tr.reminders.at(offered)} selected={hour === offered} minHeight={controlSize.minimumTarget} onPress={() => change({ hour: offered }, saveReminderHour(offered))} />
+            ))}
+          </View>
+        </Card>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The app lock (`docs/TASKS.md` F1.30), named for the sensor the phone has; the
+ * neutral name covers the frame before the hardware answers. On this device
+ * only, as Helix keeps it.
+ */
+function AppLock() {
+  const [label, setLabel] = useState<string>(tr.lock.name);
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void kv.get(LOCK_KEY).then((value) => alive && setOn(value === "true"), () => alive && setOn(false));
+    void LocalAuthentication.supportedAuthenticationTypesAsync().then(
+      (types) =>
+        alive &&
+        setLabel(
+          lockName({
+            ios: Platform.OS === "ios",
+            facial: types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION),
+            fingerprint: types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT),
+          }),
+        ),
+      // An unreadable sensor list keeps the neutral name, already right.
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const turn = (next: boolean) => {
+    setOn(next);
+    kv.set(LOCK_KEY, String(next)).catch(() => {
+      setOn(!next);
+      void appError(tr.errors.saveFailed);
+    });
+  };
+  return <ToggleRow icon={ScanFace} title={label} subtitle={tr.lock.hint} value={on === true} disabled={on === null} onValueChange={turn} />;
+}
+
 /** Under the page's own title, so the tabs keep one title line. The tab stays mounted, so the
- *  hour is read again on the hour. */
-function Greeting() {
+ *  hour is read again on the hour. The account's person, once chosen (F1.28), is greeted by
+ *  name, their picture in place of the mark. */
+function Greeting({ me }: { me?: Parameters<typeof PersonMark>[0]["person"] }) {
   const { palette } = useTheme();
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -121,11 +245,11 @@ function Greeting() {
     return () => clearTimeout(timer);
   }, [now]);
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-      <BrandMark height={authHero.mark} />
+    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md }}>
+      {me ? <PersonMark person={me} size={authHero.mark} /> : <BrandMark height={authHero.mark} />}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text accessibilityRole="header" aria-level={2} style={[type.heading, { color: palette.textStrong }]}>
-          {tr.settings.greeting[partOfDay(now)]}
+          {me ? tr.settings.named(tr.settings.greeting[partOfDay(now)], me.name) : tr.settings.greeting[partOfDay(now)]}
         </Text>
         <Body muted>{tr.settings.welcome}</Body>
       </View>

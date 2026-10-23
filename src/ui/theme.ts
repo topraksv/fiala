@@ -332,9 +332,10 @@ export function circle(size: number): number {
 
 /**
  * `minimumTarget` is the 44-point floor every pressable box keeps, because the
- * web ignores `hitSlop`; `compact` is the chip painted inside it.
+ * web ignores `hitSlop`; `compact` is the chip painted inside it; `check` is
+ * the ring a chosen row shows, Gital's `itemRow.check`.
  */
-export const controlSize = { compact: 36, minimumTarget: 44, regular: 48 } as const;
+export const controlSize = { check: 26, compact: 36, minimumTarget: 44, regular: 48 } as const;
 
 export const iconSize = { compact: 15, control: 17, headerBack: 24 } as const;
 
@@ -672,3 +673,38 @@ export const ThemeContext = createContext<Theme>({
 export function useTheme(): Theme {
   return useContext(ThemeContext);
 }
+
+/**
+ * A photo on a person's, a product's or a box's page: about a third of a phone's height, whatever
+ * its proportions. With none, the ways to bring one in are frames `source`
+ * tall, each with its icon on a disc.
+ */
+export const photoPreview = { height: 220, source: 108, disc: 44, icon: 22 } as const;
+
+/**
+ * A photo opened full screen (`src/ui/photo-viewer.native.tsx`). Black in every
+ * scheme, as a photo is looked at on black: a themed scrim would tint it, and
+ * a translucent one would show the page through it. The zoom runs from the
+ * whole photo to `maxZoom`; a double tap goes to `doubleTapZoom` and back.
+ */
+export const photoViewer = {
+  backdrop: "#000000",
+  ink: "#FFFFFF",
+  chip: "rgba(255, 255, 255, 0.16)",
+  minZoom: 1,
+  maxZoom: 4,
+  doubleTapZoom: 2.5,
+} as const;
+
+/**
+ * A person's colour (`PERSON_COLORS` in `src/db/schema.ts`): the disc of their
+ * mark, with the scheme's surface as its initial's ink. Deep in light, bright
+ * in dark, each 4.5:1 from every family's surface, so the initial reads.
+ */
+export const personColors = {
+  light: { red: "#B42318", orange: "#B54708", yellow: "#8A6100", green: "#067647", teal: "#0E7490", blue: "#1D4ED8", purple: "#6D28D9", pink: "#BE185D" },
+  dark: { red: "#F97066", orange: "#FD853A", yellow: "#FAC515", green: "#47CD89", teal: "#22CCEE", blue: "#84ADFF", purple: "#B692F6", pink: "#F670C7" },
+} as const;
+
+/** A person's mark: a disc with their photo or their initial on their colour. */
+export const personMark = { size: 32, large: 72 } as const;

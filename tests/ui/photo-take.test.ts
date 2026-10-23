@@ -1,11 +1,16 @@
 /**
- * A picture chosen from the library is kept shrunk: its longest edge at most
- * the one asked for, as a JPEG data URI.
+ * A photo is taken from the camera or the library and stored shrunk (SPEC
+ * 8.2): its longest edge at most PHOTO_EDGE, a thumbnail beside it, both as
+ * the JPEG data URIs `src/data/photos.ts` accepts.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const picker = vi.hoisted(() => ({ launchImageLibraryAsync: vi.fn() }));
+const picker = vi.hoisted(() => ({
+  requestCameraPermissionsAsync: vi.fn(async () => ({ granted: true })),
+  launchCameraAsync: vi.fn(),
+  launchImageLibraryAsync: vi.fn(),
+}));
 const resized = vi.hoisted(() => [] as unknown[]);
 vi.mock("expo-image-picker", () => picker);
 vi.mock("expo-image-manipulator", () => ({
@@ -20,12 +25,14 @@ vi.mock("expo-image-manipulator", () => ({
   },
 }));
 
-const { default: pickPicture, edgeOf } = await import("../../src/ui/photo-take");
+const { default: takePhoto, edgeOf, PHOTO_EDGE, THUMB_EDGE } = await import("../../src/ui/photo-take");
 
 const shot = { canceled: false, assets: [{ uri: "file:///a.jpg", width: 4032, height: 3024 }] };
 
 beforeEach(() => {
   resized.length = 0;
+  picker.requestCameraPermissionsAsync.mockClear();
+  picker.launchCameraAsync.mockReset().mockResolvedValue(shot);
   picker.launchImageLibraryAsync.mockReset().mockResolvedValue(shot);
 });
 
@@ -37,15 +44,22 @@ describe("edgeOf", () => {
   });
 });
 
-describe("pickPicture", () => {
-  it("keeps the picture as a JPEG data URI, shrunk to the edge asked for", async () => {
-    expect(await pickPicture(1600)).toBe("data:image/jpeg;base64,b1");
-    expect(resized).toEqual([{ width: 1600 }]);
+describe("takePhoto", () => {
+  it("stores the photo and its thumbnail as JPEG data URIs, each shrunk", async () => {
+    const taken = await takePhoto("camera");
+    expect(taken).toEqual({ data: "data:image/jpeg;base64,b1", thumb: "data:image/jpeg;base64,b2" });
+    expect(resized).toEqual([{ width: PHOTO_EDGE }, { width: THUMB_EDGE }]);
   });
 
-  it("comes back empty when nothing was picked", async () => {
+  it("asks for the camera, and says so when it is refused", async () => {
+    picker.requestCameraPermissionsAsync.mockResolvedValueOnce({ granted: false });
+    expect(await takePhoto("camera")).toBe("denied");
+    expect(picker.launchCameraAsync).not.toHaveBeenCalled();
+  });
+
+  it("asks for nothing to pick from the library, and comes back empty when nothing was picked", async () => {
     picker.launchImageLibraryAsync.mockResolvedValueOnce({ canceled: true, assets: null });
-    expect(await pickPicture(1600)).toBe("cancelled");
-    expect(resized).toEqual([]);
+    expect(await takePhoto("library")).toBe("cancelled");
+    expect(picker.requestCameraPermissionsAsync).not.toHaveBeenCalled();
   });
 });

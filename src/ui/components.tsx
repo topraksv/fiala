@@ -24,18 +24,21 @@ import AlertCircle from "lucide-react-native/icons/circle-alert";
 import CheckCircle2 from "lucide-react-native/icons/circle-check";
 import ChevronLeft from "lucide-react-native/icons/chevron-left";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
+import DatabaseZap from "lucide-react-native/icons/database-zap";
 import Eye from "lucide-react-native/icons/eye";
 import EyeOff from "lucide-react-native/icons/eye-off";
 import Minus from "lucide-react-native/icons/minus";
 import type { LucideIcon } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tr } from "../i18n/tr";
+import { pulledOnce, useSyncStatus } from "../sync/status";
+import { isSupabaseConfigured } from "../sync/supabase";
 import { selectionTap } from "./haptics";
 import { interactionBleed, interactionSurface } from "./interaction";
 import { FOCUS_BOX } from "./focus-ring";
 import { webKeys } from "./keys";
 import { KeyboardSafeScrollView } from "./keyboard-safe";
-import { useReducedMotion, useSpringTo } from "./motion";
+import { useReducedMotion, useSpringTo, useWaitBreath } from "./motion";
 import { navigateBack } from "./navigation";
 import { useRotatingPlaceholder } from "./placeholders";
 import { shouldUseWideGutter } from "./responsive";
@@ -53,6 +56,7 @@ import {
   iconSize,
   iconStroke,
   maxFontScale,
+  motion,
   navigationInset,
   offset,
   proseLeading,
@@ -304,34 +308,83 @@ export function Divider({ flush = false }: { flush?: boolean }) {
  * A settings row: a mark, a name, one line under it, and what it does at the trailing edge — a chevron to open, a switch, a button.
  * Inside a `rows` card the pressed fill bleeds to the card's sides.
  */
+const checkCircle = {
+  width: controlSize.check,
+  height: controlSize.check,
+  borderRadius: circle(controlSize.check),
+  alignItems: "center",
+  justifyContent: "center",
+} as const;
+
+/** Gital's: the empty ring, or the accent circle and its tick popping in, for a row chosen in a selection. */
+export function CheckMark({ checked }: { checked: boolean }) {
+  const { palette } = useTheme();
+  return checked ? (
+    <SuccessPop>
+      <View style={[checkCircle, { backgroundColor: palette.primary }]}>
+        <Check accessible={false} size={iconSize.compact} color={palette.onPrimary} strokeWidth={iconStroke.mark} />
+      </View>
+    </SuccessPop>
+  ) : (
+    <View style={[checkCircle, { borderWidth: borderWidth.selected, borderColor: palette.controlBorder }]} />
+  );
+}
+
+/**
+ * Gital's long press, without its swipe: a long press on a phone, a
+ * right-click on the web, and a screen reader's "Seç" action, so the gesture
+ * is never the only way (`docs/UI.md` section 8).
+ */
+function rowPress(onLongPress: (() => void) | undefined): object {
+  if (!onLongPress) return {};
+  return {
+    onLongPress,
+    ...(typeof document !== "undefined" ? { onContextMenu: (event: { preventDefault: () => void }) => { event.preventDefault(); onLongPress(); } } : null),
+    accessibilityActions: [{ name: "select", label: tr.selection.select }],
+    onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => (event.nativeEvent.actionName === "select" ? onLongPress() : undefined),
+  };
+}
+
 export function ListRow({
   icon: Icon,
   iconColor,
+  leading,
   title,
   subtitle,
   right,
   chevron = false,
   onPress,
+  onLongPress,
+  selected,
 }: {
   icon?: LucideIcon;
   iconColor?: string;
+  /** Drawn where the icon is, for a row whose mark is not an icon: a person's. */
+  leading?: ReactNode;
   title: string;
   subtitle?: string;
   right?: ReactNode;
   chevron?: boolean;
   onPress?: () => void;
+  onLongPress?: () => void;
+  /** Defined while a selection is under way: the chevron gives way to the circle that says whether this row is in it. */
+  selected?: boolean;
 }) {
   const { palette } = useTheme();
   const content = (
     <View style={{ paddingVertical: spacing.md - 2 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-        {Icon ? <Icon accessible={false} size={iconSize.control} color={iconColor ?? palette.accentText} strokeWidth={iconStroke.regular} /> : null}
+        {Icon ? <Icon accessible={false} size={iconSize.control} color={iconColor ?? palette.accentText} strokeWidth={iconStroke.regular} /> : leading}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[type.body, { color: palette.text, fontFamily: font.medium }]}>{title}</Text>
           {subtitle ? <Text style={[type.small, { color: palette.textSecondary, marginTop: offset.hair }]}>{subtitle}</Text> : null}
         </View>
         {right}
-        {chevron ? <ChevronRight accessible={false} size={iconSize.control} color={palette.textSecondary} strokeWidth={iconStroke.regular} /> : null}
+        {selected !== undefined ? (
+          <CheckMark checked={selected} />
+        ) : chevron ? (
+          <ChevronRight accessible={false} size={iconSize.control} color={palette.textSecondary} strokeWidth={iconStroke.regular} />
+        ) : null}
       </View>
     </View>
   );
@@ -340,8 +393,10 @@ export function ListRow({
     <Press
       accessibilityRole="button"
       accessibilityLabel={tr.common.withDetail(title, subtitle ?? "")}
+      accessibilityState={{ selected }}
       onPress={onPress}
-      style={(state) => ({ ...interactionBleed(), borderRadius: radius.sm, ...interactionSurface(palette, state) })}
+      {...rowPress(onLongPress)}
+      style={(state) => ({ ...interactionBleed(), borderRadius: radius.sm, ...interactionSurface(palette, state, { base: selected ? palette.primarySoft : undefined }) })}
     >
       {content}
     </Press>
@@ -366,7 +421,7 @@ export function ToggleRow({ icon, title, subtitle, value, onValueChange, disable
  * and a shadow. It is only the control: the row beside it names it
  * (`ToggleRow`), and the label here is what a screen reader hears.
  */
-function Toggle({ value, onValueChange, label, disabled = false }: { value: boolean; onValueChange: (value: boolean) => void; label: string; disabled?: boolean }) {
+export function Toggle({ value, onValueChange, label, disabled = false }: { value: boolean; onValueChange: (value: boolean) => void; label: string; disabled?: boolean }) {
   const { palette } = useTheme();
   const [progress] = useState(() => new Animated.Value(value ? 1 : 0));
   useSpringTo(progress, value ? 1 : 0);
@@ -901,6 +956,56 @@ export function IconButton({
 }
 
 /**
+ * What a screen shows while its reads keep failing (Gital's): the live
+ * queries retry on their own; the button retries now.
+ */
+export function ReadFailed({ queries }: { queries: readonly { retry: () => void }[] }) {
+  return (
+    <EmptyState
+      icon={DatabaseZap}
+      title={tr.errors.readFailedTitle}
+      hint={tr.errors.readFailedHint}
+      action={<Button label={tr.common.retry} onPress={() => queries.forEach((query) => query.retry())} />}
+    />
+  );
+}
+
+/** `pulledOnce` on screen; a build with no server has nothing to wait for. */
+function usePulledOnce(): boolean {
+  return useSyncStatus(pulledOnce) || !isSupabaseConfigured;
+}
+
+/**
+ * The shape a tab's cards keep while a signed-in device's first pull runs,
+ * where "nothing yet" would be a lie (`docs/UI.md` §7 rule 4). Nothing for 350 ms, then three
+ * cards that pulse slowly, held still under Reduce Motion, since the shape is
+ * the message. Scenery to a screen reader.
+ */
+function CardsSkeleton() {
+  const { palette } = useTheme();
+  const pulse = useWaitBreath(motion.skeleton.pulse, 0);
+  if (!pulse) return null;
+  const block = (width: number | `${number}%`, height: number, corner: number) => (
+    <Animated.View
+      style={{ width, height, borderRadius: corner, backgroundColor: palette.surfaceAlt, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [...motion.skeleton.opacity] }) }}
+    />
+  );
+  return (
+    <View accessible={false} aria-hidden style={{ gap: density.list.rowGap }}>
+      {[0, 1, 2].map((row) => (
+        <View key={row} style={{ ...cardEdge(palette), flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+          {block(iconSize.control, iconSize.control, radius.sm)}
+          <View style={{ flex: 1, gap: spacing.xs }}>
+            {block(motion.skeleton.lines[0], type.body.fontSize, radius.sm)}
+            {block(motion.skeleton.lines[1], type.small.fontSize, radius.sm)}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
  * What a screen says when it has nothing to show, and the way out of it. It
  * grows to centre itself, so on a tall window the sentence is not left against
  * the header with the page empty beneath it; on a phone it is the padded block
@@ -912,13 +1017,18 @@ export function EmptyState({
   title,
   hint,
   action,
+  skeleton,
 }: {
   icon: LucideIcon;
   title: string;
   hint: string;
   action?: ReactNode;
+  /** A tab's: until this device's first pull, the cards it waits for, not "nothing". */
+  skeleton?: boolean;
 }) {
   const { palette } = useTheme();
+  const pulled = usePulledOnce();
+  if (skeleton && !pulled) return <CardsSkeleton />;
   return (
     <View style={{ flexGrow: 1, justifyContent: "center", padding: spacing.xxl, alignItems: "center", gap: spacing.sm }}>
       <View

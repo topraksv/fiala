@@ -30,7 +30,7 @@ test("the shell opens, reaches Ayarlar and keeps the theme @cross-browser", asyn
   const failures = await watchFailures(page);
   await page.goto("/fiala/");
 
-  await expect(page.getByRole("heading", { name: "Fiala kuruluyor" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Henüz özetlenecek bir şey yok" })).toBeVisible();
 
   await page.getByRole("tab", { name: "Ayarlar" }).click();
   await expect(page.getByRole("heading", { name: "Ayarlar" })).toBeVisible();

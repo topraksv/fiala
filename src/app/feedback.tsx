@@ -48,8 +48,8 @@ export default function FeedbackScreen() {
   const pick = async () => {
     setRefusal(null);
     try {
-      const taken = await (await loadTake())(screenshot.edge);
-      if (taken !== "cancelled") setImages((current) => [...current, taken]);
+      const taken = await (await loadTake())("library", screenshot.edge);
+      if (typeof taken !== "string") setImages((current) => [...current, taken.data]);
     } catch {
       setRefusal(tr.feedback.unreadable);
     }

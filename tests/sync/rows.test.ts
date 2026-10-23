@@ -8,8 +8,32 @@ describe("a row crossing to the server and back", () => {
   const STAMP = "2026-09-27T10:00:00.123Z";
   const setting = { id: ID, created_at: STAMP, updated_at: STAMP, deleted_at: null, tombstone_version: 0, key: "greeting", value: '"merhaba"' };
 
-  it("keys a row by its person and its id", () => {
-    expect(keyColumns()).toEqual(["user_id", "id"]);
+  it("keys a setting by its person and a medicine row by its cabinet", () => {
+    expect(keyColumns("settings")).toEqual(["user_id", "id"]);
+    expect(keyColumns("packages")).toEqual(["cabinet_id", "id"]);
+  });
+
+  it("sends a cabinet's row as the device wrote it, with no person stamped on it", () => {
+    const location = { id: ID, created_at: STAMP, updated_at: STAMP, deleted_at: null, tombstone_version: 0, cabinet_id: USER, name: "Banyo" };
+    expect(toServerRow("locations", location, USER)).toEqual(location);
+    const { cabinet_id: _, ...homeless } = location;
+    expect(toServerRow("locations", homeless, USER), "a row with no cabinet has nowhere to go").toBeNull();
+  });
+
+  it("takes a cabinet's row whoever wrote it, since the server decided who may read it", () => {
+    const OTHER = "22222222-2222-4222-8222-222222222222";
+    const move = { id: ID, created_at: STAMP, updated_at: STAMP, deleted_at: null, tombstone_version: 0, cabinet_id: OTHER, package_id: ID, quantity_milli: -1000, reason: "use" };
+    expect(toLocalRow("package_moves", { ...move, user_id: OTHER }, USER)).toEqual(move);
+  });
+
+  it("sends a boolean as a boolean, and stores it as SQLite's number", () => {
+    const product = { id: ID, created_at: STAMP, updated_at: STAMP, deleted_at: null, tombstone_version: 0, cabinet_id: USER, name: "Parol", starred: 1 };
+    expect(toServerRow("products", product, USER)).toMatchObject({ starred: true });
+    expect(toServerRow("products", { ...product, starred: 0 }, USER)).toMatchObject({ starred: false });
+    expect(toServerRow("products", { ...product, starred: 2 }, USER), "SQLite holds a boolean as 0 or 1").toBeNull();
+    expect(toLocalRow("products", { ...product, starred: false }, USER)).toMatchObject({ starred: 0 });
+    expect(toLocalRow("products", { ...product, starred: true }, USER)).toMatchObject({ starred: 1 });
+    expect(() => toLocalRow("products", { ...product, starred: 1 }, USER), "the server sends a boolean, never a number").toThrow();
   });
 
   it("puts the person into the row", () => {

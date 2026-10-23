@@ -1,7 +1,7 @@
 {
   "name": "Fiala",
   "short_name": "Fiala",
-  "description": "Fiala kuruluyor",
+  "description": "Evdeki ilaçlar, son kullanma tarihleri ve stok tek dolapta.",
   "lang": "tr",
   "start_url": "/fiala/",
   "scope": "/fiala/",

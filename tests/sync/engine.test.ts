@@ -3,8 +3,8 @@
  * under the real migrations and write layer, through the shipped engine,
  * against `fake-cloud.ts` — which keeps the server's clock, its delete
  * generations and its row rules. Only the network is a stand-in. The rows are
- * settings, the one entity the shell syncs; what holds for them holds for the
- * tables a feature adds.
+ * mostly settings: the engine treats every table alike, and the cabinet's
+ * tests prove what differs, their key.
  *
  * The rule the outbox keeps: a row leaves it only when the server
  * has said it has it, under the session that sent it.
@@ -48,6 +48,10 @@ const { tr } = await import("../../src/i18n/tr");
 const { migratedDatabase } = await import("../helpers");
 const { migrateDb } = await import("../../src/db/migrate");
 const { deterministicId, naturalKeys } = await import("../../src/db/ids");
+const { addPackage, readCabinet, remainingMilli, setPhoto, takeFrom } = await import("../../src/data/cabinet");
+const { readPhoto } = await import("../../src/data/photos");
+const { purgeOwnPhotos } = await import("../../src/sync/photos");
+const { acceptInvite, answerOffer, cancelInvites, createInvite, offerCabinet, peekInvite, useOffers } = await import("../../src/sync/sharing");
 
 const USER = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
@@ -80,6 +84,14 @@ const valueOf = async (key: string) => {
 const serverRow = (id: string) => cloud.rows("settings").find((row) => row.id === id);
 /** A value the server refuses, whatever the person is: it holds a setting of 10,000 characters at most. */
 const TOO_LONG = "x".repeat(10_001);
+const JPEG = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).toString("base64")}`;
+/** A box with a photo of it, on the device in hand; its id and the photo's. */
+async function boxWithPhoto(name = "Parol"): Promise<{ box: string; photoId: string }> {
+  const box = await addPackage(signedIn, { name }, { unit: "tablet" }, 1000);
+  await setPhoto("packages", box, { data: JPEG, thumb: JPEG });
+  return { box, photoId: String((harness.db!.prepare("SELECT photo_id FROM packages WHERE id = ?").get(box) as { photo_id: string }).photo_id) };
+}
+const thumbs = async () => (await readCabinet()).flatMap((product) => product.boxes.map((box) => box.thumb));
 /** Delete a setting, as a feature's delete would, and take it back. */
 const deleteAndRestore = async (id: string) => undoRows((await deleteRows("settings", [id]))!);
 
@@ -118,6 +130,31 @@ describe("two devices of one person", () => {
     await on("C", async () => {
       expect(await sync()).toBe(true);
       expect(await readSettings()).toEqual([]);
+    });
+  });
+
+  it("brings a box to the other device under its cabinet, counts a use made on each offline, and shows it to no one else", async () => {
+    const box = await on("A", async () => {
+      const made = await addPackage(USER, { name: "Parol", gtin: "8699546090112" }, { unit: "tablet", expiresOn: "2027-03-31" }, 20_000);
+      expect(await sync()).toBe(true);
+      return made;
+    });
+    expect(cloud.rows("packages")).toEqual([expect.objectContaining({ cabinet_id: USER, id: box, expires_on: "2027-03-31" })]);
+    expect(cloud.rows("packages")[0], "a cabinet's row names no person").not.toHaveProperty("user_id");
+
+    await on("B", async () => {
+      await sync();
+      await takeFrom(box, 1000);
+    });
+    await on("A", () => takeFrom(box, 2000));
+    for (const device of ["B", "A", "B"] as const) await on(device, sync);
+    expect(await on("A", () => remainingMilli(box))).toBe(17_000);
+    expect(await on("B", () => remainingMilli(box))).toBe(17_000);
+
+    await on("C", async () => {
+      expect(await sync()).toBe(true);
+      expect(await remainingMilli(box)).toBe(0);
+      expect(devices.C.prepare("SELECT COUNT(*) AS n FROM packages").get()).toEqual({ n: 0 });
     });
   });
 
@@ -188,6 +225,9 @@ describe("two devices of one person", () => {
       await deleteRows("settings", [id]);
       await sync();
     });
+    // `created_at` is what tells a row made afresh from an edit, to the
+    // millisecond: made in A's millisecond, B's row would be an edit.
+    await new Promise((resolve) => setTimeout(resolve, 2));
     await on("B", async () => {
       await put("greeting", "yeniden");
       await sync();
@@ -696,6 +736,260 @@ async function downgradeWithoutDeletedAt() {
   await migrateDb();
 }
 
+describe("photos", () => {
+  it("sends a photo before the row naming it, and the other device fetches it", async () => {
+    const { photoId } = await on("A", async () => {
+      const made = await boxWithPhoto();
+      await sync();
+      return made;
+    });
+    expect(cloud.requests.indexOf(`upload ${photoId}/full.jpg`)).toBeLessThan(cloud.requests.indexOf("upsert packages"));
+    expect([...cloud.objects.keys()].sort()).toEqual([`${photoId}/full.jpg`, `${photoId}/thumb.jpg`]);
+
+    await on("B", async () => {
+      await sync();
+      expect(await thumbs()).toEqual([JPEG]);
+      expect(await readPhoto(photoId)).toBe(JPEG);
+    });
+  });
+
+  it("sends a product's and a person's photo before their rows", async () => {
+    const ids = await on("A", async () => {
+      await addPackage(USER, { name: "Parol" }, { unit: "tablet" }, 1000);
+      const product = String((devices.A.prepare("SELECT id FROM products").get() as { id: string }).id);
+      await setPhoto("products", product, { data: JPEG, thumb: JPEG });
+      await writeRows([{ table: "people", row: { id: "019f6bba-2c65-7ea8-a6c9-000000000001", cabinetId: USER, name: "Zeynep" } }]);
+      await setPhoto("people", "019f6bba-2c65-7ea8-a6c9-000000000001", { data: JPEG, thumb: JPEG });
+      await sync();
+      return devices.A.prepare("SELECT photo_id FROM products UNION ALL SELECT photo_id FROM people").all().map((row) => String((row as { photo_id: string }).photo_id));
+    });
+    for (const [table, photoId] of [["products", ids[0]], ["people", ids[1]]] as const) {
+      expect(cloud.requests.indexOf(`upload ${photoId}/full.jpg`), table).toBeLessThan(cloud.requests.indexOf(`upsert ${table}`));
+    }
+  });
+
+  it("is never another cabinet's to fetch", async () => {
+    const { photoId } = await on("A", async () => {
+      const made = await boxWithPhoto();
+      await sync();
+      return made;
+    });
+    await on("C", async () => {
+      expect((await cloud.client().storage.from("photos").download(`${photoId}/full.jpg`)).error).toMatchObject({ status: 404 });
+    });
+  });
+
+  it("removes, a month on, the photos no row names any more, from Storage and from the device", async () => {
+    const { box, photoId } = await on("A", async () => {
+      const made = await boxWithPhoto();
+      await sync();
+      return made;
+    });
+    const kept = await on("A", async () => {
+      await deleteRows("packages", [box]);
+      const { photoId: other } = await boxWithPhoto("Arveles");
+      await sync();
+      return other;
+    });
+    expect(devices.A.prepare("SELECT id FROM photos WHERE id = ?").all(photoId), "within the month, the device keeps it").toHaveLength(1);
+    for (const object of cloud.objects.values()) object.at -= 31 * 86_400_000;
+    devices.A.prepare("UPDATE photos SET created_at = ?").run(new Date(Date.now() - 31 * 86_400_000).toISOString());
+    await on("A", () => sync());
+    expect([...cloud.objects.keys()].sort(), "an object its row named a month ago goes; a named one stays").toEqual([`${kept}/full.jpg`, `${kept}/thumb.jpg`]);
+    expect(devices.A.prepare("SELECT id FROM photos").all(), "and the device's copy").toEqual([{ id: kept }]);
+  });
+
+  it("asks again for a photo that the network, not Storage, kept from arriving", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      await sync();
+    });
+    await on("B", async () => {
+      cloud.downloadFailure = { message: "Failed to fetch" };
+      expect(await sync(), "an unreachable Storage fails the sync").toBe(false);
+      cloud.downloadFailure = null;
+      expect(await sync()).toBe(true);
+      expect(await thumbs()).toEqual([JPEG]);
+    });
+  });
+
+  it("tells a photo Storage does not have from a Storage that did not answer", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      await sync();
+    });
+    await on("B", async () => {
+      cloud.downloadFailure = { message: "Internal error", status: 503 };
+      expect(await sync(), "a server error is not an answer").toBe(false);
+      cloud.downloadFailure = { message: "Object not found", status: 404 };
+      expect(await sync(), "not there is an answer: the rows sync without it").toBe(true);
+      cloud.downloadFailure = null;
+      const before = cloud.requests.length;
+      await sync();
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("download")), "not asked again this session").toEqual([]);
+      expect(await thumbs()).toEqual([null]);
+    });
+  });
+
+  it("passes over a photo Storage refuses for good, and sends again one it only failed", async () => {
+    await on("A", async () => {
+      const { photoId } = await boxWithPhoto();
+      const uploaded = () => devices.A.prepare("SELECT uploaded_at FROM photos WHERE id = ?").get(photoId) as { uploaded_at: string | null };
+
+      cloud.failOn.set("upload", { message: "Internal error", status: 503 });
+      expect(await sync(), "a failed send fails the sync").toBe(false);
+      expect(uploaded().uploaded_at).toBeNull();
+      expect(cloud.rows("packages"), "and holds back the row naming it").toEqual([]);
+
+      cloud.failOn.set("upload", { message: "new row violates row-level security policy", status: 403 });
+      expect(await sync(), "a refusal for good does not hold the rest").toBe(true);
+      expect(uploaded().uploaded_at, "still unsent").toBeNull();
+      expect(cloud.rows("packages")).toHaveLength(1);
+
+      const before = cloud.requests.length;
+      await sync();
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("upload")), "not offered again this session").toEqual([]);
+    });
+  });
+
+  it("finishes a photo whose send was cut short between its two sizes", async () => {
+    await on("A", async () => {
+      const { photoId } = await boxWithPhoto();
+      cloud.objects.set(`${photoId}/full.jpg`, { owner: USER, bytes: new Uint8Array([0xff, 0xd8, 0xff]), at: Date.now() });
+      expect(await sync()).toBe(true);
+      expect([...cloud.objects.keys()].sort()).toEqual([`${photoId}/full.jpg`, `${photoId}/thumb.jpg`]);
+      expect(devices.A.prepare("SELECT uploaded_at FROM photos WHERE id = ?").get(photoId)).not.toMatchObject({ uploaded_at: null });
+    });
+  });
+
+  it("removes photos from Storage a hundred at a time", async () => {
+    const old = Date.now() - 31 * 86_400_000;
+    for (let at = 0; at < 100; at++) {
+      const id = `019f6bba-2c65-7ea8-a6c9-${String(at).padStart(12, "0")}`;
+      for (const size of ["full", "thumb"]) cloud.objects.set(`${id}/${size}.jpg`, { owner: USER, bytes: new Uint8Array([0xff]), at: old });
+    }
+    await on("A", async () => {
+      const before = cloud.requests.length;
+      cloud.failOn.set("rpc unnamed_photos", { message: "boom", code: "XX000" });
+      expect(await sync(), "a sweep that cannot ask waits for the next session").toBe(true);
+      expect(cloud.objects.size).toBe(200);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("remove"))).toEqual([]);
+    });
+    await on("A", async () => {
+      const before = cloud.requests.length;
+      await sync();
+      expect(cloud.objects.size).toBe(0);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("remove"))).toEqual(["remove 100", "remove 100"]);
+    });
+    for (let at = 0; at < 100; at++) {
+      const id = `019f6bba-2c65-7ea8-a6c9-${String(at).padStart(12, "0")}`;
+      for (const size of ["full", "thumb"]) cloud.objects.set(`${id}/${size}.jpg`, { owner: USER, bytes: new Uint8Array([0xff]), at: Date.now() });
+    }
+    await on("A", async () => {
+      const before = cloud.requests.length;
+      await purgeOwnPhotos();
+      expect(cloud.objects.size).toBe(0);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("remove"))).toEqual(["remove 100", "remove 100"]);
+    });
+  });
+
+  it("keeps the row naming a photo back while the photo cannot be sent", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      cloud.failures.push({ message: "Failed to fetch" });
+      expect(await sync()).toBe(false);
+      expect(cloud.rows("packages")).toEqual([]);
+      expect(await sync()).toBe(true);
+      expect(cloud.rows("packages")).toHaveLength(1);
+    });
+  });
+
+  it("reads a fetched photo through FileReader where the Blob cannot give its bytes, as on a phone", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      await sync();
+    });
+    const bytes = Blob.prototype.arrayBuffer;
+    const failing = new Set(["first"]);
+    vi.stubGlobal(
+      "FileReader",
+      class {
+        result: string | null = null;
+        error: Error | null = null;
+        onloadend: () => void = () => {};
+        readAsDataURL(blob: Blob) {
+          void bytes.call(blob).then((buffer) => {
+            if (failing.delete("first")) this.error = new Error("read failed");
+            else this.result = `data:application/octet-stream;base64,${Buffer.from(buffer).toString("base64")}`;
+            this.onloadend();
+          });
+        }
+      },
+    );
+    Object.defineProperty(Blob.prototype, "arrayBuffer", { value: undefined, configurable: true });
+    try {
+      await on("B", async () => {
+        expect(await sync(), "a read that fails fails the sync").toBe(false);
+        expect(await sync()).toBe(true);
+        expect(await thumbs()).toEqual([JPEG]);
+      });
+    } finally {
+      Object.defineProperty(Blob.prototype, "arrayBuffer", { value: bytes, configurable: true });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("asks Storage once a launch for a photo it does not have, and never for a path a row made up", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      const other = await addPackage(USER, { name: "Arveles" }, { unit: "tablet" }, 1000);
+      // What another build could send: the server takes any uuid here, and the device any text.
+      const { fromDbShape } = await import("../../src/db/mutations");
+      await writeRows([{ table: "packages", row: { ...fromDbShape("packages", devices.A.prepare("SELECT * FROM packages WHERE id = ?").get(other) as Record<string, unknown>), photoId: "../../avatars/someone" } }]);
+      await sync();
+    });
+    cloud.objects.clear();
+    await on("B", async () => {
+      expect(await sync()).toBe(true);
+      expect(await sync()).toBe(true);
+      expect(cloud.requests.filter((request) => request.startsWith("download")), "one ask per size, and only for a photo's own path").toHaveLength(2);
+      expect(await thumbs()).toEqual([null, null]);
+    });
+  });
+
+  it("takes a file that is not a JPEG for no photo at all", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      await sync();
+    });
+    for (const object of cloud.objects.values()) object.bytes = new TextEncoder().encode("<script>");
+    await on("B", async () => {
+      expect(await sync()).toBe(true);
+      expect(await thumbs()).toEqual([null]);
+    });
+  });
+
+  it("removes every photo the account sent, and marks them to send again", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      await sync();
+      cloud.failures.push({ message: "Failed to fetch" });
+      await expect(purgeOwnPhotos(), "a list it could not get").rejects.toThrow("photo purge");
+      const release = cloud.hold("rpc own_photo_objects");
+      const purging = purgeOwnPhotos();
+      await vi.waitFor(() => expect(cloud.requests.at(-1)).toBe("rpc own_photo_objects"));
+      cloud.failures.push({ message: "Failed to fetch" });
+      release();
+      await expect(purging, "a removal that failed").rejects.toThrow("photo purge");
+      expect(devices.A.prepare("SELECT uploaded_at FROM photos").all(), "still marked sent").not.toEqual([{ uploaded_at: null }]);
+
+      await purgeOwnPhotos();
+      expect(cloud.objects.size).toBe(0);
+      expect(devices.A.prepare("SELECT uploaded_at FROM photos").all()).toEqual([{ uploaded_at: null }]);
+    });
+  });
+});
+
 describe("what one copy must not do to another's", () => {
   /** A setting A deleted, which B then pulls: the server holds a column B's build is about to lose. */
   async function deletedSetting() {
@@ -790,5 +1084,211 @@ describe("what one copy must not do to another's", () => {
     expect(outcome).toBe(true);
     expect(cloud.requests.filter((request) => request === "select settings")).toHaveLength(2);
     expect(devices.A.prepare("SELECT count(*) AS n FROM settings").get()).toEqual({ n: 1001 });
+  });
+});
+
+describe("a shared cabinet", () => {
+  const HOUSE = "0190a000-0000-7000-8000-00000000a0a0";
+  const count = (device: DatabaseSync, sql: string) => (device.prepare(sql).get() as { n: number }).n;
+
+  /** C's household with a box in it, then A's own box synced, so every cursor on A is past the household's rows; then A is let in. */
+  async function joined(role: "editor" | "viewer" = "editor"): Promise<{ box: string; mine: string }> {
+    cloud.insertAsServer("cabinets", { id: HOUSE, owner_id: OTHER, name: "Ev" });
+    const box = await on("C", async () => {
+      const made = await addPackage(HOUSE, { name: "Ventolin" }, { unit: "doz" }, 200_000);
+      await sync();
+      return made;
+    });
+    const mine = await on("A", async () => {
+      const made = await addPackage(USER, { name: "Parol", gtin: "8699546090112" }, { unit: "tablet" }, 20_000);
+      await sync();
+      return made;
+    });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000b0b1", cabinet_id: HOUSE, user_id: OTHER, role: "owner", name: "Can", seen_at: null });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000b0b2", cabinet_id: HOUSE, user_id: USER, role, name: "Ece", seen_at: null });
+    return { box, mine };
+  }
+
+  it("fetches a cabinet whole the first time its membership arrives, older than every cursor", async () => {
+    const { box, mine } = await joined();
+    // Someone's copy of A's own product id, in the household: it must not move A's.
+    const product = String(cloud.rows("products").find((row) => row.cabinet_id === USER)!.id);
+    cloud.insertAsServer("products", { cabinet_id: HOUSE, id: product, name: "Başka" });
+    await on("A", async () => {
+      expect(await sync(), String(useSyncStatus.getState().error)).toBe(true);
+      expect(await remainingMilli(box)).toBe(200_000);
+      expect(await remainingMilli(mine)).toBe(20_000);
+    });
+    expect(devices.A.prepare("SELECT cabinet_id, name FROM products WHERE id = ?").get(product), "the device's own row stays its own").toEqual({ cabinet_id: USER, name: "Parol" });
+    expect(count(devices.A, `SELECT COUNT(*) AS n FROM cabinets WHERE id = '${HOUSE}'`)).toBe(1);
+    expect(count(devices.A, `SELECT COUNT(*) AS n FROM cabinet_members WHERE cabinet_id = '${HOUSE}'`)).toBe(2);
+    cloud.requests.length = 0;
+    await on("A", sync);
+    expect(cloud.requests.filter((request) => request === "select packages"), "once a device").toEqual([]);
+
+    // A's use in the household reaches its owner.
+    await on("A", () => takeFrom(box, 1000));
+    await on("A", sync);
+    expect(await on("C", async () => (await sync(), remainingMilli(box)))).toBe(199_000);
+  });
+
+  it("drops the cabinet, and what was still to send for it, once the person is removed", async () => {
+    const { box, mine } = await joined();
+    await on("A", sync);
+    await on("A", () => takeFrom(box, 1000));
+    const member = cloud.tables.get("cabinet_members")!.get("0190a000-0000-7000-8000-00000000b0b2")!;
+    cloud.tables.get("cabinet_members")!.set(String(member.id), { ...member, deleted_at: "2030-01-02T00:00:00.000000+00:00", tombstone_version: 1, updated_at: "2031-01-01T00:00:00.000000+00:00" });
+    await on("A", async () => {
+      await sync();
+      expect(await remainingMilli(box)).toBe(0);
+      expect(await remainingMilli(mine), "A's own cabinet stays").toBe(20_000);
+    });
+    for (const table of ["cabinets", "packages", "package_moves", "products"]) {
+      const column = table === "cabinets" ? "id" : "cabinet_id";
+      expect(count(devices.A, `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = '${HOUSE}'`), table).toBe(0);
+    }
+    expect(count(devices.A, "SELECT COUNT(*) AS n FROM outbox") + count(devices.A, "SELECT COUNT(*) AS n FROM sync_dead_letters"), "nothing waits for a cabinet the server will not take it into").toBe(0);
+  });
+
+  it("lets a viewer read the household and sends none of its writes", async () => {
+    const { box } = await joined("viewer");
+    await on("A", async () => {
+      await sync();
+      await takeFrom(box, 1000);
+      await sync();
+    });
+    expect(count(devices.A, "SELECT COUNT(*) AS n FROM sync_dead_letters"), "set aside, as any refused row").toBe(1);
+    expect(await on("C", async () => (await sync(), remainingMilli(box)))).toBe(200_000);
+  });
+
+  it("drops a household whose owner deleted the account, which no pull would have said", async () => {
+    const { box } = await joined();
+    await on("A", sync);
+    cloud.deleteAccount(OTHER);
+    await on("A", async () => {
+      await sync();
+      expect(await remainingMilli(box)).toBe(0);
+    });
+    expect(count(devices.A, `SELECT COUNT(*) AS n FROM cabinet_members`)).toBe(0);
+  });
+});
+
+describe("an invitation into a household (F2.2)", () => {
+  const HOUSE = "0190a000-0000-7000-8000-00000000c0c0";
+  const SECOND = "0190a000-0000-7000-8000-00000000c0c1";
+  const MINE = "0190a000-0000-7000-8000-00000000c0c2";
+  const received = () => useOffers.getState().received;
+  const household = (id: string, name: string) => writeRows([{ table: "cabinets", row: { id, ownerId: OTHER, name } }]);
+
+  /** C's household with a box in it, made a moment ago and not yet sent, and A let in by C's link. */
+  async function invited(): Promise<string> {
+    const { token, box } = await on("C", async () => {
+      await household(HOUSE, "Ev");
+      const made = await addPackage(HOUSE, { name: "Ventolin" }, { unit: "doz" }, 200_000);
+      const sent = vi.fn(sync);
+      const link = await createInvite(HOUSE, "editor", "Can", sent);
+      expect(sent, "the household goes to the server first").toHaveBeenCalledTimes(1);
+      return { token: (link as { token: string }).token, box: made };
+    });
+    await on("A", async () => {
+      expect(await peekInvite(token)).toEqual({ name: "Ev", inviter: "Can", role: "editor" });
+      expect(await acceptInvite(token, "Ece")).toEqual({ cabinetId: HOUSE });
+      expect(await acceptInvite(token, "Ece"), "a link works once").toEqual({ refused: tr.sharing.errInvite });
+    });
+    return box;
+  }
+
+  it("lets the person in, and the household arrives with their next sync", async () => {
+    const box = await invited();
+    await on("A", async () => {
+      expect(await remainingMilli(box)).toBe(0);
+      await sync();
+      expect(await remainingMilli(box)).toBe(200_000);
+    });
+    expect(devices.A.prepare("SELECT user_id, role, name FROM cabinet_members ORDER BY role").all()).toEqual([
+      { user_id: USER, role: "editor", name: "Ece" },
+      { user_id: OTHER, role: "owner", name: "Can" },
+    ]);
+  });
+
+  it("says why an invitation could not be made, used or taken back", async () => {
+    await invited();
+    await on("C", async () => {
+      const sent = vi.fn(sync);
+      expect(await createInvite(OTHER, "editor", "Can", sent)).toEqual({ refused: tr.sharing.errPersonal });
+      expect(sent, "only a household the server lacks is sent and asked again").not.toHaveBeenCalled();
+      const link = (await createInvite(HOUSE, "viewer", "Can", sync)) as { token: string };
+      expect(await cancelInvites(HOUSE)).toEqual({ cancelled: 1 });
+      expect(await peekInvite(link.token), "taken back, it leads nowhere").toBeNull();
+      cloud.failures.push({ message: "TypeError: Failed to fetch" }, { message: "boom", code: "XX000" });
+      expect(await cancelInvites(HOUSE)).toEqual({ refused: tr.sync.errNetwork });
+      expect(await cancelInvites(HOUSE)).toEqual({ refused: tr.sharing.errGeneric });
+    });
+    await on("A", async () => {
+      const sent = vi.fn(sync);
+      expect(await createInvite(HOUSE, "editor", "Ece", sent), "only the owner invites").toEqual({ refused: tr.sharing.errNotOwner });
+      expect(sent, "sent, then asked once more").toHaveBeenCalledTimes(1);
+    });
+    harness.cloud = { client: () => null };
+    expect(await acceptInvite("a".repeat(64), "Ece")).toEqual({ refused: tr.auth.errNotConfigured });
+  });
+
+  it("reaches someone already in a household as an offer with their next sync, and lets them in once they accept", async () => {
+    await invited();
+    // A offers one of their own first, which waits on C, never on A.
+    await on("A", async () => {
+      await writeRows([{ table: "cabinets", row: { id: MINE, ownerId: USER, name: "Yazlık" } }]);
+      expect(await offerCabinet(MINE, OTHER, "editor", "Ece", sync)).toEqual({ offered: true });
+    });
+    await on("C", async () => {
+      await household(SECOND, "Annemler");
+      expect(await offerCabinet(SECOND, USER, "viewer", "Can", sync)).toEqual({ offered: true });
+      expect(await offerCabinet(HOUSE, USER, "editor", "Can", sync), "told who is in, not that a link expired").toEqual({ refused: tr.sharing.errAlreadyIn });
+    });
+    await on("A", async () => {
+      expect(received()).toEqual([]);
+      await sync();
+      expect(received()).toEqual([{ cabinetId: SECOND, cabinetName: "Annemler", role: "viewer", fromName: "Can", to: USER }]);
+      cloud.requests.length = 0;
+      await sync();
+      expect(cloud.requests.filter((request) => request === "rpc cabinet_offers"), "asked again only when they change").toEqual([]);
+      expect(await answerOffer(SECOND, true, "Ece")).toEqual({ cabinetId: SECOND });
+      expect(received(), "gone at once, not at the next sync").toEqual([]);
+      await sync();
+      expect(received()).toEqual([]);
+    });
+    expect(devices.A.prepare(`SELECT role FROM cabinet_members WHERE cabinet_id = '${SECOND}' AND user_id = '${USER}'`).get()).toEqual({ role: "viewer" });
+  });
+
+  it("forgets the offers with the session, follows a withdrawal, and tries again when they do not arrive", async () => {
+    await invited();
+    await on("C", async () => {
+      await household(SECOND, "Annemler");
+      await household(MINE, "Yazlık");
+      await offerCabinet(SECOND, USER, "editor", "Can", sync);
+      const sent = vi.fn(sync);
+      expect(await offerCabinet(MINE, USER, "editor", "Can", sent)).toEqual({ offered: true });
+      expect(sent, "a household the server holds is not sent again").not.toHaveBeenCalled();
+    });
+    await on("A", async () => {
+      cloud.failOn.set("rpc cabinet_offers", { message: "TypeError: fetch failed" });
+      expect(await sync(), "the sync owes nothing to the offers").toBe(true);
+      expect(received()).toEqual([]);
+      await sync();
+      expect(received()).toHaveLength(2);
+      expect(await answerOffer(MINE, false, "Ece")).toEqual({ cabinetId: null });
+      expect(received().map((offer) => offer.cabinetId), "declining one leaves the other").toEqual([SECOND]);
+    });
+    await on("A", async () => expect(received(), "a new session starts empty").toEqual([]));
+    await on("C", async () => {
+      await sync();
+      expect(received(), "the one who offered has nothing waiting").toEqual([]);
+      expect(await offerCabinet(SECOND, USER, null, "Can", sync)).toEqual({ offered: true });
+    });
+    await on("A", async () => {
+      await sync();
+      expect(received(), "withdrawn").toEqual([]);
+      expect(await answerOffer(SECOND, true, "Ece"), "a withdrawn offer cannot be accepted").toEqual({ refused: tr.sharing.errInvite });
+    });
   });
 });

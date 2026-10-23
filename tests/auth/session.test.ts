@@ -27,6 +27,8 @@ const device = vi.hoisted(() => ({
   failing: new Set<string>(),
   /** Keys whose next read throws, and the one after answers. */
   readFailsOnce: new Set<string>(),
+  /** Times every scheduled reminder was taken off the phone. */
+  cancelled: 0,
 }));
 const cloud = vi.hoisted(() => ({
   configured: true,
@@ -82,7 +84,9 @@ const sync = vi.hoisted(() => ({
   /** What a flush that sends took from the outbox. */
   sent: [] as Record<string, unknown>[],
   onFlush: null as (() => void) | null,
+  purgeFails: false,
 }));
+vi.mock("../../src/services/reminders", () => ({ cancelReminders: async () => void device.cancelled++ }));
 vi.mock("../../src/sync/engine", () => ({
   startSyncSession: (userId: string) => void sync.calls.push(`start:${userId}`),
   stopSyncSession: async () => void sync.calls.push("stop"),
@@ -93,6 +97,12 @@ vi.mock("../../src/sync/engine", () => ({
     const waiting = harness.db!.prepare("SELECT payload FROM outbox ORDER BY id").all() as { payload: string }[];
     sync.sent.push(...waiting.map(({ payload }) => JSON.parse(payload) as Record<string, unknown>));
     harness.db!.exec("DELETE FROM outbox");
+  },
+}));
+vi.mock("../../src/sync/photos", () => ({
+  purgeOwnPhotos: async () => {
+    cloud.calls.push("photos:purge");
+    if (sync.purgeFails) throw new Error("Failed to fetch");
   },
 }));
 vi.mock("../../src/sync/supabase", () => {
@@ -121,7 +131,8 @@ vi.mock("../../src/sync/supabase", () => {
       signOut: async ({ scope }: { scope: string }) => {
         cloud.calls.push(`signOut:${scope}`);
         if (cloud.throws) throw new TypeError("Network request failed");
-        cloud.session = null;
+        // Every other device's session ends; this one's stays.
+        if (scope !== "others") cloud.session = null;
         // A global revoke after the account is deleted finds no user to revoke.
         return { error: scope === "global" ? { message: "User not found" } : null };
       },
@@ -226,8 +237,9 @@ beforeEach(() => {
   device.dropped.clear();
   device.failing.clear();
   device.readFailsOnce.clear();
+  device.cancelled = 0;
   Object.assign(cloud, { configured: true, users: [A, B], session: null, sessionError: null, rpcError: null, updateError: null, signUpError: null, resetError: null, verifyError: null, signUpSession: true, savedPassword: null, emailChange: null, throws: false, calls: [] });
-  Object.assign(sync, { calls: [], flushSends: false, sent: [], onFlush: null });
+  Object.assign(sync, { calls: [], flushSends: false, sent: [], onFlush: null, purgeFails: false });
   useSession.setState({ userId: null, email: null, ready: false, previousLoginAt: null });
 });
 
@@ -245,9 +257,11 @@ describe("whose rows the device holds", () => {
   it("will not let another account sign in over rows never sent, and empties the device once they were", async () => {
     await session().signIn(A.email, A.password);
     await makeRow();
+    device.stored.set("fiala.reminders.names", "true");
     useSession.setState({ userId: null });
 
     expect(await session().signIn(B.email, B.password)).toBe(tr.auth.errOtherAccountPending);
+    expect(device.stored.get("fiala.reminders.names"), "A's opt-in, while A's rows wait").toBe("true");
     expect(cloud.calls).toContain("signOut:local");
     expect(session().userId).toBeNull();
     expect(rows()).toBe(1);
@@ -257,6 +271,8 @@ describe("whose rows the device holds", () => {
     expect(rows()).toBe(0);
     expect(count("outbox"), "B's own sign-in, its flag and its device, and nothing of A's").toBe(2);
     expect(device.stored.get(OWNER)).toBe(B.id);
+    expect(device.cancelled, "A's reminders, with A's rows").toBe(1);
+    expect(device.stored.has("fiala.reminders.names"), "B has not let a lock screen name its medicines").toBe(false);
   });
 
   it("refuses a sign-in whose ownership it could not record, or read", async () => {
@@ -399,6 +415,7 @@ describe("opening the app", () => {
       session().verifyPassword(A.password),
       session().changeEmail(A.email),
       session().changePassword(A.password, "yeni-parola1"),
+      session().signOutOthers(),
     ]) {
       expect(await refused).toBe(tr.auth.errNotConfigured);
     }
@@ -415,6 +432,7 @@ describe("opening the app", () => {
     expect(rows()).toBe(1);
     expect(device.stored.has(LAST_USER)).toBe(false);
     expect(device.stored.get(OWNER)).toBe(A.id);
+    expect(device.cancelled, "the rows wait behind sign-in, not on the lock screen").toBe(1);
 
     for (const listener of cloud.listeners) listener("TOKEN_REFRESHED");
     await session().signIn(A.email, A.password);
@@ -499,6 +517,7 @@ describe("signing out", () => {
     // Only this device: the phone stays signed in when the web signs out.
     expect(cloud.calls).toEqual(["signOut:local"]);
     for (const key of [OWNER, LAST_USER, LAST_EMAIL]) expect(device.stored.has(key)).toBe(false);
+    expect(device.cancelled).toBe(1);
   });
 
   it("keeps everything, the account still signed in, when the device cannot be emptied", async () => {
@@ -632,7 +651,17 @@ describe("deleting the account", () => {
     expect(await session().deleteAccount()).toBe(tr.auth.errSessionExpired);
     expect(session().userId).toBe(A.id);
     expect(rows()).toBe(1);
-    expect(sync.calls.at(-1), "and syncs again").toBe(`start:${A.id}`);
+    expect(sync.calls.at(-1), "and syncs again, the photos it took down sent back").toBe(`start:${A.id}`);
+  });
+
+  it("deletes nothing when the account's photos could not be taken down first", async () => {
+    await session().signIn(A.email, A.password);
+    await makeRow();
+    sync.purgeFails = true;
+    expect(await session().deleteAccount()).toBe(tr.account.deleteCloudFailed);
+    expect(cloud.calls).toEqual(["photos:purge"]);
+    expect(session().userId).toBe(A.id);
+    expect(rows()).toBe(1);
   });
 
   it("then empties the device and ends every session the account had", async () => {
@@ -640,10 +669,11 @@ describe("deleting the account", () => {
     await makeRow();
     expect(await session().deleteAccount()).toBeNull();
     expect(sync.calls).toEqual([`start:${A.id}`, "stop"]);
-    expect(cloud.calls).toEqual(["rpc:delete_own_account", "signOut:global", "signOut:local"]);
+    expect(cloud.calls).toEqual(["photos:purge", "rpc:delete_own_account", "signOut:global", "signOut:local"]);
     expect(session().userId).toBeNull();
     expect(rows()).toBe(0);
     for (const key of [OWNER, LAST_USER, LAST_EMAIL]) expect(device.stored.has(key)).toBe(false);
+    expect(device.cancelled).toBe(1);
   });
 
   it("leaves a device it could not empty to be emptied by whoever signs in next", async () => {
@@ -784,6 +814,16 @@ describe("checking the password again", () => {
     expect(await session().changePassword(A.password, A.password)).toBe(tr.auth.errSamePassword);
     cloud.updateError = { message: "Email rate limit exceeded" };
     expect(await session().changeEmail("yeni@ev.com")).toBe(tr.auth.errRateLimit);
+  });
+
+  it("ends the account's other sessions and keeps this one, with its data", async () => {
+    await session().signIn(A.email, A.password);
+    await makeRow();
+    cloud.calls.length = 0;
+    expect(await session().signOutOthers()).toBeNull();
+    expect(cloud.calls).toEqual(["signOut:others"]);
+    expect(session().userId).toBe(A.id);
+    expect(rows()).toBe(1);
   });
 
   it("asks for a new sign-in when no address is known anywhere", async () => {

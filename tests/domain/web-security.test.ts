@@ -5,9 +5,10 @@ import { contentSecurityPolicy, trustedSupabaseOrigin } from "../../src/domain/w
 const directive = (policy: string, name: string) => policy.split("; ").find((part) => part.startsWith(`${name} `)) ?? "";
 
 describe("the web build's network boundary", () => {
-  it("trusts one HTTPS Supabase project origin and nothing shaped like it", () => {
+  it("trusts one HTTPS Supabase project origin, or this machine's local stack, and nothing shaped like either", () => {
     expect(trustedSupabaseOrigin("https://project-ref.supabase.co")).toBe("https://project-ref.supabase.co");
     expect(trustedSupabaseOrigin("https://project-ref.supabase.co/")).toBe("https://project-ref.supabase.co");
+    expect(trustedSupabaseOrigin("http://127.0.0.1:54321")).toBe("http://127.0.0.1:54321");
     for (const raw of [
       undefined,
       "",
@@ -21,6 +22,12 @@ describe("the web build's network boundary", () => {
       "https://project-ref.supabase.co/#x",
       "https://sub.project-ref.supabase.co",
       "https://project-ref.supabase.co.attacker.example",
+      "http://127.0.0.1",
+      "http://127.0.0.1:54321/rest/v1",
+      "http://user@127.0.0.1:54321",
+      "http://127.0.0.2:54321",
+      "http://localhost:54321",
+      "https://127.0.0.1:54321",
     ])
       expect(trustedSupabaseOrigin(raw)).toBeNull();
   });

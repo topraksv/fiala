@@ -4,11 +4,12 @@
  * every party the code sends data to. The rest is prose, reviewed by reading.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { tr } from "../../src/i18n/tr";
+import { OPEN_SOURCE } from "../../src/ui/open-source";
 
 const root = join(import.meta.dirname, "..", "..");
 const read = (path: string) => readFileSync(join(root, path), "utf8");
@@ -48,6 +49,15 @@ describe("the privacy notice", () => {
     const notice = read("src/ui/legal-notice.tsx");
     expect(notice.indexOf("tr.legal.consentLabel")).toBeGreaterThan(notice.indexOf("<LegalNoticeBody />"));
     expect(tr.legal.signUpNotice).toMatch(/hesap oluşturduğunda/i);
+  });
+
+  it("asks for health data apart from the notice, before the first box is written, and says how to take it back", () => {
+    const addBox = read("src/app/add-box.tsx");
+    expect(addBox.indexOf("hasHealthConsent(")).toBeGreaterThan(-1);
+    expect(addBox.indexOf("giveHealthConsent()")).toBeLessThan(addBox.indexOf("await addPackage("));
+    expect(tr.legal.purposes.find((purpose) => /sağlık verisi/.test(purpose))).toMatch(/KVKK m\. 6/);
+    expect(tr.legal.selfService.join(" ")).toMatch(/rızayı geri almak[\s\S]*Verileri Sıfırla → Dolap/);
+    expect(tr.addBox.consentBody).toMatch(/Verileri Sıfırla → Dolap/);
   });
 
   it("letters the Article 11 rights as the statute does", () => {
@@ -95,7 +105,7 @@ describe("the privacy notice", () => {
       tr.legal.contactTitle,
     ];
     expect(titles.map((title) => title.split(".")[0])).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
-    for (const purpose of tr.legal.purposes) expect(purpose).toMatch(/Hukuki sebep: KVKK m\. 5/);
+    for (const purpose of tr.legal.purposes) expect(purpose).toMatch(/Hukuki sebep: KVKK m\. [56]/);
     expect(tr.legal.methodBody).toMatch(/doğrudan sizden/);
     expect(tr.legal.transferNote).toMatch(/m\. 9/);
     expect(tr.legal.contactBody(tr.legal.contactEmail)).toMatch(/Kişisel Verileri Koruma Kurulu/);
@@ -132,11 +142,12 @@ describe("the privacy manifest", () => {
       ["NSPrivacyCollectedDataTypeOtherUserContent", /Ayar verisi/],
       ["NSPrivacyCollectedDataTypePhotosorVideos", /ekran görüntüleri/],
       ["NSPrivacyCollectedDataTypeCustomerSupport", /[Gg]eri bildirim/],
+      ["NSPrivacyCollectedDataTypeHealth", /Sağlık verisi/],
     ] as const) {
       expect(declared.has(type), `${type} must be declared to Apple`).toBe(true);
       expect(notice, `${type} must also be described in the notice`).toMatch(described);
     }
-    expect(declared.size, "a type declared to Apple and not in Turkish would slip past the rows above").toBe(4);
+    expect(declared.size, "a type declared to Apple and not in Turkish would slip past the rows above").toBe(5);
   });
 
   it("declares only the required-reason API the app's own binary drives", () => {
@@ -145,5 +156,17 @@ describe("the privacy manifest", () => {
     expect(manifest.NSPrivacyAccessedAPITypes).toEqual([
       { NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryFileTimestamp", NSPrivacyAccessedAPITypeReasons: ["C617.1"] },
     ]);
+  });
+});
+
+describe("Yardım's licence list", () => {
+  it("names every dependency under the licence its package declares, and every bundled typeface under the OFL", () => {
+    const { "SIL OFL 1.1": fonts, ...packages } = OPEN_SOURCE;
+    const named = Object.entries(packages).flatMap(([licence, names]) => names.map((name) => [name, licence] as const));
+    expect(named.map(([name]) => name).sort()).toEqual(Object.keys(JSON.parse(read("package.json")).dependencies).sort());
+    for (const [name, licence] of named) expect(JSON.parse(read(`node_modules/${name}/package.json`)).license, name).toBe(licence);
+    const ofl = readdirSync(join(root, "assets/fonts")).filter((file) => file.endsWith("-OFL.txt"));
+    expect(fonts).toHaveLength(ofl.length);
+    for (const file of ofl) expect(read(`assets/fonts/${file}`)).toContain("SIL Open Font License, Version 1.1");
   });
 });

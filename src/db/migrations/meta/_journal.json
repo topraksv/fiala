@@ -8,6 +8,27 @@
       "when": 1792650832431,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792674892421,
+      "tag": "0001_medicine_cabinet",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792678312580,
+      "tag": "0002_cabinet_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792712809564,
+      "tag": "0003_cabinet_members",
+      "breakpoints": true
     }
   ]
 }

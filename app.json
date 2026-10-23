@@ -50,6 +50,14 @@
             ]
           },
           {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeHealth",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
             "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeCustomerSupport",
             "NSPrivacyCollectedDataTypeLinked": true,
             "NSPrivacyCollectedDataTypeTracking": false,
@@ -88,14 +96,28 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Fiala, uygulama kilidini açarken kimliğini Face ID ile doğrular."
+        }
+      ],
       "expo-font",
       "expo-sqlite",
       [
         "expo-image-picker",
         {
-          "photosPermission": "Fiala, geri bildirimine eklemek için seçtiğin görseli kullanır.",
-          "cameraPermission": false,
+          "photosPermission": "Fiala, ilaçlarına, kutularına, kişilere ya da geri bildirimine eklemek için seçtiğin fotoğrafı kullanır.",
+          "cameraPermission": "Fiala, ilaç kutusunun fotoğrafını çekmek ve karekodunu okumak için kameranı kullanır.",
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Fiala, ilaç kutusunun fotoğrafını çekmek ve karekodunu okumak için kameranı kullanır.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ]
     ],

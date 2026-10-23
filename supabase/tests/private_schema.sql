@@ -1,11 +1,11 @@
 -- The `private` schema (migration 1): where the helpers a policy calls live,
--- so PostgREST never serves them. Empty until a feature's policy needs one.
+-- so PostgREST never serves them: today the cabinet's (migrations 2 and 4).
 begin;
 
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(5);
+select extensions.plan(6);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -35,9 +35,15 @@ select is(
 );
 select is(
   (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace
-     and p.proname in ('can_read_list', 'can_write_list') ),
+     and p.proname in ('can_read_cabinet', 'can_write_cabinet') ),
   0::bigint,
-  'and none of them is left in the exposed schema'
+  'and none of them is in the exposed schema'
+);
+select is(
+  (select count(*) from pg_proc p where p.pronamespace = 'private'::regnamespace
+     and p.proname in ('can_read_cabinet', 'can_write_cabinet')),
+  2::bigint,
+  'the cabinet''s helpers are here'
 );
 
 select * from extensions.finish();

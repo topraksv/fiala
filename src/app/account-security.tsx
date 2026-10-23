@@ -8,6 +8,7 @@ import { Redirect, router } from "expo-router";
 import Eraser from "lucide-react-native/icons/eraser";
 import KeyRound from "lucide-react-native/icons/key-round";
 import Mail from "lucide-react-native/icons/mail";
+import MonitorSmartphone from "lucide-react-native/icons/monitor-smartphone";
 import RotateCcw from "lucide-react-native/icons/rotate-ccw";
 import Snowflake from "lucide-react-native/icons/snowflake";
 import Trash from "lucide-react-native/icons/trash";
@@ -16,7 +17,7 @@ import { deviceId } from "../auth/login-history";
 import { isValidNewPassword, useSession, type EmailChangeCodes } from "../auth/session";
 import { isEmail } from "../domain/names";
 import { useSettings } from "../data/hooks";
-import { lastLogin } from "../domain/logins";
+import { deviceLogins, lastLogin } from "../domain/logins";
 import { tr } from "../i18n/tr";
 import { kv } from "../services/kv";
 import { isSupabaseConfigured } from "../sync/supabase";
@@ -33,7 +34,7 @@ export default function AccountSecurityScreen() {
 }
 
 function CloudAccountSecurity() {
-  const { email, previousLoginAt, verifyPassword, changePassword, freezeAccount, deleteAccount } = useSession();
+  const { email, previousLoginAt, verifyPassword, changePassword, freezeAccount, deleteAccount, signOutOthers } = useSession();
   const { palette } = useTheme();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -88,6 +89,12 @@ function CloudAccountSecurity() {
     const refused = await freezeAccount();
     if (refused) await appError(refused);
   });
+  const endOthers = run("others", async () => {
+    if (!(await appConfirm(tr.account.signOutOthersTitle, tr.account.signOutOthersBody, tr.account.signOutOthers))) return;
+    const refused = await signOutOthers();
+    if (refused) return void (await appError(refused));
+    showNotice(tr.account.signedOutOthers);
+  });
   const remove = run("delete", async () => {
     if (!(await appConfirm(tr.account.deleteTitle, tr.account.deleteBody, tr.account.deleteConfirm))) return;
     if (!(await passwordFor(tr.account.deletePasswordBody, tr.account.deleteConfirm))) return;
@@ -128,6 +135,16 @@ function CloudAccountSecurity() {
 
       <ResetCard email={email} busy={busy} run={run} onDraft={draftIn("reset")} />
 
+      <Card>
+        <PanelHeader icon={MonitorSmartphone} title={tr.account.devices} description={tr.account.devicesHint} />
+        {deviceLogins(settings.data, device).map((login) => (
+          <Body key={`${login.device} ${login.at}`} style={{ marginBottom: spacing.sm }}>
+            {tr.account.deviceLine(login.at, login.device, login.here)}
+          </Body>
+        ))}
+        <Button label={tr.account.signOutOthers} variant="secondary" loading={busy === "others"} disabled={busy != null} onPress={() => void endOthers()} />
+      </Card>
+
       {/* Erasing records sits above the two endings: the same kind of decision
           at a smaller scale, and the one reached for first when what is wanted
           is a clean slate rather than no account. */}
@@ -157,7 +174,7 @@ function CloudAccountSecurity() {
   );
 }
 
-type Busy = "email" | "emailCodes" | "password" | "reset" | "resetSave" | "freeze" | "delete" | null;
+type Busy = "email" | "emailCodes" | "password" | "reset" | "resetSave" | "freeze" | "delete" | "others" | null;
 /** One change at a time across the screen's cards. */
 type Run = (which: NonNullable<Busy>, work: () => Promise<void>) => () => Promise<void>;
 type CardProps = { email: string | null; busy: Busy; run: Run; onDraft: (dirty: boolean) => void };

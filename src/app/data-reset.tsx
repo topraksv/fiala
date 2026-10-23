@@ -15,20 +15,21 @@ import { showNotice } from "../ui/undo";
 
 export default function DataResetScreen() {
   const verifyPassword = useSession((s) => s.verifyPassword);
+  const userId = useSession((s) => s.userId);
   const [chosen, setChosen] = useState<readonly ResetScope[]>([]);
   const [counted, setCounted] = useState<{ of: readonly ResetScope[]; count: number } | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let current = true;
-    countDataReset(chosen).then(
+    countDataReset(chosen, userId ?? "").then(
       (count) => current && setCounted({ of: chosen, count }),
       () => current && void appError(tr.errors.readFailedTitle),
     );
     return () => {
       current = false;
     };
-  }, [chosen]);
+  }, [chosen, userId]);
   // A count of an earlier choice is no count: the button waits for this one's.
   const count = counted?.of === chosen ? counted.count : null;
 
@@ -40,7 +41,7 @@ export default function DataResetScreen() {
     if (password == null) return;
     const refused = await verifyPassword(password);
     if (refused) return appError(refused);
-    showNotice(tr.dataReset.done(await resetData(chosen)));
+    showNotice(tr.dataReset.done(await resetData(chosen, userId ?? "")));
     setChosen([]);
   };
   // `.catch`, not `try`: the React Compiler lowers no `finally`, and leaves the whole screen unmemoised.

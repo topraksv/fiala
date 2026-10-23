@@ -7,6 +7,9 @@
 import { addDatabaseChangeListener } from "expo-sqlite";
 import type { SyncedTableName } from "../db/schema";
 
+/** The tables a read may watch: the synced ones, and the photos that reach the device after their rows. */
+type WatchedTable = SyncedTableName | "photos";
+
 type LiveQueryStatus = "loading" | "ready" | "stale" | "error";
 
 export interface LiveResult<T> {
@@ -42,7 +45,7 @@ const COALESCE_MS = 60;
  */
 function startRunner<T>(
   query: () => PromiseLike<T[]>,
-  tables: readonly SyncedTableName[],
+  tables: readonly WatchedTable[],
   apply: (next: (previous: Snapshot<T>) => Snapshot<T>) => void,
 ): { retry: () => void; stop: () => void } {
   let attempt = 0;
@@ -124,7 +127,7 @@ const NOT_YET: Snapshot<never> = { data: [], status: "loading", error: null, upd
  * over it read one query, not two — as long as they
  * hold the same store, which `hooks.ts` keeps at module scope.
  */
-export function liveStore<T>(query: () => PromiseLike<T[]>, tables: readonly SyncedTableName[]): LiveStore<T> {
+export function liveStore<T>(query: () => PromiseLike<T[]>, tables: readonly WatchedTable[]): LiveStore<T> {
   const listeners = new Set<() => void>();
   let runner: { retry: () => void; stop: () => void } | null = null;
   const retry = () => runner?.retry();

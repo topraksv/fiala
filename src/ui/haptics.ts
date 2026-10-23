@@ -17,6 +17,10 @@ export function selectionTapIfChanged(previous: string | null | undefined, next:
   if (previous !== next) selectionTap();
 }
 
+export function mediumTap(): void {
+  feel(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
+}
+
 export function errorNotice(): void {
   feel(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error));
 }

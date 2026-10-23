@@ -1,4 +1,6 @@
 import { Tabs } from "expo-router/js-tabs";
+import BookOpen from "lucide-react-native/icons/book-open";
+import BriefcaseMedical from "lucide-react-native/icons/briefcase-medical";
 import House from "lucide-react-native/icons/house";
 import Settings from "lucide-react-native/icons/settings";
 import type { LucideIcon } from "lucide-react-native";
@@ -9,7 +11,9 @@ import { TabBar } from "../../ui/tab-bar";
 import { useTheme } from "../../ui/theme";
 
 const TABS: readonly { name: string; title: string; Icon: LucideIcon }[] = [
-  { name: "index", title: tr.tabs.home, Icon: House },
+  { name: "index", title: tr.tabs.status, Icon: House },
+  { name: "cabinet", title: tr.tabs.cabinet, Icon: BriefcaseMedical },
+  { name: "guide", title: tr.tabs.guide, Icon: BookOpen },
   { name: "settings", title: tr.tabs.settings, Icon: Settings },
 ];
 
