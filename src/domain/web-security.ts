@@ -16,9 +16,9 @@
  * project's.
  */
 export function trustedSupabaseOrigin(raw: string | undefined): string | null {
-  if (!raw) return null;
   try {
-    const url = new URL(raw);
+    // None is "undefined", which is no URL.
+    const url = new URL(String(raw));
     const plain = !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash;
     const hosted = url.protocol === "https:" && !url.port && /^[a-z0-9-]+\.supabase\.co$/i.test(url.hostname);
     const local = url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port !== "";
@@ -30,7 +30,8 @@ export function trustedSupabaseOrigin(raw: string | undefined): string | null {
 
 export function contentSecurityPolicy(supabaseUrl: string | undefined): string {
   const origin = trustedSupabaseOrigin(supabaseUrl);
-  const project = origin ? ` ${origin}` : "";
+  // The live households' socket (`src/sync/live.ts`): the same project over `wss:`, or `ws:` on the local stack.
+  const project = origin ? ` ${origin} ${origin.replace("http", "ws")}` : "";
   return [
     "default-src 'self'",
     // For the sqlite worker's WebAssembly: Chromium gives a worker loaded by URL

@@ -8,7 +8,7 @@ import PackageCheck from "lucide-react-native/icons/package-check";
 import PackageX from "lucide-react-native/icons/package-x";
 
 import { editBoxes, type CabinetBox, type CabinetProduct } from "../data/cabinet";
-import { useCabinet } from "../data/hooks";
+import { useHouseholds, useShownCabinet } from "../data/hooks";
 import { SOON_DAYS, expiryState, formatDay, isEmpty, localDay } from "../domain/boxes";
 import { undoRows } from "../db/mutations";
 import { tr } from "../i18n/tr";
@@ -21,7 +21,7 @@ type Held = { product: CabinetProduct; box: CabinetBox };
 
 export default function ToDispose() {
   const { palette } = useTheme();
-  const cabinet = useCabinet();
+  const cabinet = useShownCabinet();
   const today = localDay();
   // As Durum counts them: an empty box asks for nothing.
   const expired: Held[] = cabinet.data.flatMap((product) =>
@@ -30,6 +30,9 @@ export default function ToDispose() {
       .map((box) => ({ product, box })),
   );
   const nameOf = ({ product, box }: Held) => tr.common.boxName(product, box);
+  const { writes } = useHouseholds();
+  // A household the person only reads keeps its boxes on the list, for whoever may mark them.
+  const theirs = expired.filter(({ box }) => writes(box.cabinetId));
 
   const dispose = async (held: readonly Held[]) => {
     try {
@@ -62,11 +65,11 @@ export default function ToDispose() {
                 iconColor={palette.error}
                 title={nameOf(held)}
                 subtitle={tr.cabinet.expires(formatDay(held.box.expiresOn!))}
-                right={<IconButton icon={PackageCheck} label={tr.toDispose.done(nameOf(held))} onPress={() => void dispose([held])} />}
+                right={theirs.includes(held) ? <IconButton icon={PackageCheck} label={tr.toDispose.done(nameOf(held))} onPress={() => void dispose([held])} /> : undefined}
               />
             ))}
           </Card>
-          <Button label={tr.toDispose.all} variant="secondary" onPress={() => void dispose(expired)} />
+          {theirs.length > 0 ? <Button label={tr.toDispose.all} variant="secondary" onPress={() => void dispose(theirs)} /> : null}
         </>
       )}
     </Screen>

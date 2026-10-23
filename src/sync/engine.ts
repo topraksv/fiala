@@ -548,6 +548,26 @@ function forgetCabinet(sqlite: LocalDatabase, cabinet: string): Promise<void> {
   });
 }
 
+/** Long past any undo, and past a clock a few days wrong. */
+const PURGE_AFTER_MS = 7 * 86_400_000;
+
+/**
+ * A household deleted a week ago goes from the device with its rows, which
+ * stayed live under it and out of every read; Gital's `purgeDeletedLists`.
+ * Never one whose tombstone is still to send or was set aside: the server
+ * holds it live, and the device would forget it before saying so.
+ */
+async function purgeDeletedHouseholds(): Promise<void> {
+  const sqlite = await getSqliteAsync();
+  const gone = await sqlite.getAllAsync<{ id: string }>(
+    `SELECT id FROM cabinets WHERE deleted_at IS NOT NULL AND deleted_at < ?
+       AND NOT EXISTS (SELECT 1 FROM outbox WHERE table_name = 'cabinets' AND row_id = cabinets.id)
+       AND NOT EXISTS (SELECT 1 FROM sync_dead_letters WHERE table_name = 'cabinets' AND row_id = cabinets.id)`,
+    [new Date(Date.now() - PURGE_AFTER_MS).toISOString()],
+  );
+  for (const { id } of gone) await forgetCabinet(sqlite, id);
+}
+
 const RETRIED = "retried:";
 
 /**
@@ -590,6 +610,8 @@ async function runSync(userId: string, token: SessionEpochToken, allowRefresh: b
     await pushOutbox(supabase, userId, token);
     await pullAll(supabase, userId, token);
     await followMemberships(supabase, userId, token);
+    assertActive(token);
+    await purgeDeletedHouseholds();
     await fetchMissingPhotos(supabase, token.signal);
     await sweepUnnamedPhotos(supabase, token.signal);
     assertActive(token);

@@ -1,0 +1,1 @@
+ALTER TABLE `cabinets` ADD `photo_id` text;

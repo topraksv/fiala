@@ -6,7 +6,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(35);
+select extensions.plan(49);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -59,7 +59,13 @@ insert into public.cabinet_members (cabinet_id, user_id, role, name) values
   ('c0000000-0000-7000-8000-00000000000c', '20000000-0000-4000-8000-000000000002', 'editor', 'Eda'),
   ('c0000000-0000-7000-8000-00000000000c', '30000000-0000-4000-8000-000000000003', 'viewer', 'Can');
 insert into public.products (cabinet_id, id, name) values
-  ('c0000000-0000-7000-8000-00000000000c', 'a1000000-0000-7000-8000-00000000000a', 'Parol');
+  ('c0000000-0000-7000-8000-00000000000c', 'a1000000-0000-7000-8000-00000000000a', 'Parol'),
+  -- What A keeps private (F2.5) is in A's own cabinet.
+  ('10000000-0000-4000-8000-000000000001', 'a9000000-0000-7000-8000-00000000000a', 'Özel');
+-- The household's photo (migration 9), placed by its owner.
+update public.cabinets set photo_id = 'e0000000-0000-7000-8000-00000000000e' where id = 'c0000000-0000-7000-8000-00000000000c';
+insert into storage.objects (bucket_id, name, owner_id) values
+  ('photos', 'e0000000-0000-7000-8000-00000000000e/full.jpg', '10000000-0000-4000-8000-000000000001');
 
 -- D, outside.
 select set_config('request.jwt.claim.sub', '40000000-0000-4000-8000-000000000004', true);
@@ -74,9 +80,11 @@ select is(
   '42501',
   'no device makes a cabinet under an account''s id, which would take that person''s own'
 );
+-- As PostgREST pushes it: an upsert that returns the row it wrote.
 select lives_ok(
   $$insert into public.cabinets (id, owner_id, name) values
-    ('d0000000-0000-7000-8000-00000000000d', '40000000-0000-4000-8000-000000000004', 'Ev')$$,
+    ('d0000000-0000-7000-8000-00000000000d', '40000000-0000-4000-8000-000000000004', 'Ev')
+    on conflict (id) do update set name = excluded.name returning id$$,
   'a device makes a household''s cabinet'
 );
 update public.cabinets set name = 'Yazlık', owner_id = '20000000-0000-4000-8000-000000000002'
@@ -103,9 +111,22 @@ select is(
 select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000002', true);
 set local role authenticated;
 
-select is((select count(*) from public.products), 1::bigint, 'an editor reads the cabinet');
+select is((select count(*) from public.products), 1::bigint, 'an editor reads the cabinet, and nothing its owner keeps private');
+select is(
+  pg_temp.exec_sqlstate($$insert into public.products (cabinet_id, id, name) values
+    ('10000000-0000-4000-8000-000000000001', 'a8000000-0000-7000-8000-00000000000a', 'X')$$),
+  '42501',
+  'nor writes there'
+);
 select is((select count(*) from public.cabinet_members), 3::bigint, 'and who is in it');
 select is((select count(*) from public.cabinets), 2::bigint, 'and holds it beside their own');
+select is((select count(*) from storage.objects where bucket_id = 'photos'), 1::bigint, 'and sees its photo');
+select is(
+  pg_temp.exec_sqlstate($$insert into storage.objects (bucket_id, name, owner_id) values
+    ('photos', 'e0000000-0000-7000-8000-00000000000e/thumb.jpg', '20000000-0000-4000-8000-000000000002')$$),
+  '42501',
+  'but places none at its id: the photo is the owner''s, as the name is'
+);
 update public.cabinets set name = 'X', deleted_at = now() where id = 'c0000000-0000-7000-8000-00000000000c';
 select is(
   (select name || ':' || (deleted_at is null) from public.cabinets where id = 'c0000000-0000-7000-8000-00000000000c'),
@@ -190,6 +211,10 @@ select lives_ok(
   $$update public.cabinets set name = 'Ev' where id = 'c0000000-0000-7000-8000-00000000000c'$$,
   'the owner names the household'
 );
+set local role postgres;
+update storage.objects set created_at = now() - interval '31 days' where bucket_id = 'photos';
+set local role authenticated;
+select is((select count(*) from public.unnamed_photos()), 0::bigint, 'and the photo it names is never swept as unnamed');
 
 -- B, removed.
 select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000002', true);
@@ -210,6 +235,59 @@ set local role authenticated;
 
 update public.cabinet_members set deleted_at = now() where user_id = '30000000-0000-4000-8000-000000000003';
 select is((select count(*) from public.products), 0::bigint, 'a member who leaves reads the cabinet no more');
+
+-- Realtime (migration 10, Gital's): each change in a household is told on its
+-- private channel, which only its members hear and where nobody speaks.
+set local role postgres;
+select ok(
+  (select count(*) > 0 from realtime.messages
+    where topic = 'cabinet:c0000000-0000-7000-8000-00000000000c' and event = 'moved' and private and extension = 'broadcast' and payload ? 'by'),
+  'a change in a household is told on its private channel, with who made it'
+);
+select is(
+  (select count(*) from realtime.messages where topic = 'cabinet:40000000-0000-4000-8000-000000000004'),
+  0::bigint,
+  'a personal cabinet''s on none'
+);
+select set_config('realtime.topic', 'cabinet:c0000000-0000-7000-8000-00000000000c', true);
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select ok((select count(*) > 0 from realtime.messages), 'its members hear it');
+select is(
+  pg_temp.exec_sqlstate($$insert into realtime.messages (topic, extension, event, payload, private) values ('cabinet:c0000000-0000-7000-8000-00000000000c', 'broadcast', 'moved', '{}', true)$$),
+  '42501',
+  'but only the server says it moved'
+);
+select set_config('realtime.topic', 'cabinet:not-a-cabinet', true);
+select is((select count(*) from realtime.messages), 0::bigint, 'a topic that names no cabinet is nobody''s');
+select set_config('realtime.topic', 'cabinet:c0000000-0000-7000-8000-00000000000c', true);
+select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000002', true);
+select is((select count(*) from realtime.messages), 0::bigint, 'someone no longer in it hears nothing');
+
+-- The one removed is told on their own channel, which only they hear.
+set local role postgres;
+select ok(
+  (select count(*) > 0 from realtime.messages
+    where topic = 'user:20000000-0000-4000-8000-000000000002' and event = 'moved' and private and payload ->> 'cabinet' = 'c0000000-0000-7000-8000-00000000000c'),
+  'someone removed from a household is told on their own channel'
+);
+select set_config('realtime.topic', 'user:20000000-0000-4000-8000-000000000002', true);
+set local role authenticated;
+select ok((select count(*) > 0 from realtime.messages), 'and hears it');
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+select is((select count(*) from realtime.messages), 0::bigint, 'nobody else does');
+select set_config('realtime.topic', '', true);
+
+-- And a push of many rows is told once.
+set local role postgres;
+create temp table heard_before as select count(*) as n from realtime.messages where topic = 'cabinet:c0000000-0000-7000-8000-00000000000c';
+insert into public.products (cabinet_id, id, name)
+select 'c0000000-0000-7000-8000-00000000000c', gen_random_uuid(), 'bulk ' || n from generate_series(1, 3) n;
+select is(
+  (select count(*) from realtime.messages where topic = 'cabinet:c0000000-0000-7000-8000-00000000000c') - (select n from heard_before),
+  1::bigint,
+  'three rows in one push are one nudge'
+);
 
 -- Deleting an account.
 set local role postgres;

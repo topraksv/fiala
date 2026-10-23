@@ -79,6 +79,16 @@ describe("the Supabase clients", () => {
     expect(seen).toEqual([["SIGNED_IN", session]]);
   });
 
+  it("gives the live socket the project, its key and the session's token, and nothing without a project", async () => {
+    const { realtimeAccess } = await load();
+    const access = realtimeAccess()!;
+    expect([access.url, access.apiKey]).toEqual(["https://example.supabase.co", "publishable-test-key"]);
+    expect(await access.accessToken(), "signed out").toBeNull();
+    harness.client.auth.getSession.mockResolvedValueOnce({ data: { session: { access_token: "jwt" } } });
+    expect(await access.accessToken()).toBe("jwt");
+    expect((await load({})).realtimeAccess()).toBeNull();
+  });
+
   it("offers no client when the project is not configured", async () => {
     for (const env of [{}, { url: "https://example.supabase.co" }, { key: "publishable-test-key" }]) {
       const { createClient, createRecoveryClient, getSupabase, isSupabaseConfigured } = await load(env);

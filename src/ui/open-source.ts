@@ -6,6 +6,7 @@
  */
 export const OPEN_SOURCE: Readonly<Record<string, readonly string[]>> = {
   MIT: [
+    "@supabase/realtime-js",
     "@supabase/supabase-js",
     "babel-preset-expo",
     "expo",

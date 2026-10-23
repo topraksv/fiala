@@ -18,10 +18,11 @@ import ShoppingBasket from "lucide-react-native/icons/shopping-basket";
 import SlidersHorizontal from "lucide-react-native/icons/sliders-horizontal";
 
 import type { CabinetBox, CabinetProduct } from "../../data/cabinet";
-import { useCabinet, usePeople } from "../../data/hooks";
+import { usePeople, useShownCabinet } from "../../data/hooks";
 import { OPENED_SOON_DAYS, SOON_DAYS, daysUntil, expiryState, formatAmount, formatDay, inView, isEmpty, isLow, lastOpenDay, localDay, matchesSearch, type BoxView, type ExpiryState } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
 import { canScan } from "../../services/barcode-scan";
+import { Attention } from "../../ui/attention";
 import { openCabinet } from "../../ui/cabinet-link";
 import { Body, Button, Card, EmptyState, IconButton, ListRow, Notice, ReadFailed, Screen, SectionHeader, TextField } from "../../ui/components";
 import { PersonMark } from "../../ui/named-choices";
@@ -102,7 +103,7 @@ function HomeCheck({ home, subtitle, open }: { home: Held[]; subtitle: (box: Cab
 export default function Status() {
   const router = useRouter();
   const { palette } = useTheme();
-  const cabinet = useCabinet();
+  const cabinet = useShownCabinet();
   const people = usePeople();
   const { unread } = useNotices();
   const [layout, setLayout] = useState<CardLayout | null>(null);
@@ -120,6 +121,7 @@ export default function Status() {
   if (cabinet.data.length === 0) {
     return (
       <Screen title={tr.tabs.status}>
+        <Attention />
         <EmptyState icon={House} title={tr.status.emptyTitle} hint={tr.status.emptyHint} skeleton action={<Button label={tr.cabinet.addFirst} icon={Plus} onPress={add} />} />
       </Screen>
     );
@@ -219,6 +221,7 @@ export default function Status() {
         </View>
       }
     >
+      <Attention />
       <Card>
         <Body muted>{tr.status.summaryHint}</Body>
         <Text style={[type.title, { color: palette.text, marginBottom: spacing.md }]}>{tr.status.summary(products, home.length)}</Text>
@@ -233,3 +236,4 @@ export default function Status() {
     </Screen>
   );
 }
+

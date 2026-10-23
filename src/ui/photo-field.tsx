@@ -49,7 +49,8 @@ export function PhotoField({
   name: string;
   photoId: string | null;
   thumb: string | null;
-  onChange: (change: NewPhoto | null) => void;
+  /** Absent where the person only reads: the photo is shown, never changed. */
+  onChange?: (change: NewPhoto | null) => void;
 }) {
   const { palette } = useTheme();
   const shown = useStored(photoId, thumb);
@@ -62,7 +63,7 @@ export function PhotoField({
       .then(
         (taken) => {
           if (taken === "denied") return appError(tr.photos.denied);
-          if (taken !== "cancelled") onChange(taken);
+          if (taken !== "cancelled") onChange?.(taken);
         },
         () => appError(tr.photos.failed),
       );
@@ -72,6 +73,7 @@ export function PhotoField({
     Platform.OS === "web"
       ? [[ImagePlus, shown ? tr.photos.change : tr.photos.add, "library"]]
       : [[Camera, tr.photos.camera, "camera"], [ImagePlus, tr.photos.library, "library"]];
+  if (!onChange && !shown) return null;
   return (
     <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
       <Body>{tr.photos.title}</Body>
@@ -87,14 +89,18 @@ export function PhotoField({
           </Press>
           {enlarged ? <PhotoViewer uri={shown} label={tr.photos.of(name)} onClose={() => setEnlarged(false)} /> : null}
           {/* On the photo's own corners: what is drawn is what they act on. */}
-          <View style={{ position: "absolute", top: spacing.xs, right: spacing.xs }}>
-            <IconButton icon={X} label={tr.photos.remove} onPress={() => onChange(null)} />
-          </View>
-          <View style={{ position: "absolute", bottom: spacing.xs, right: spacing.xs, flexDirection: "row" }}>
-            {sources.map(([icon, label, from]) => (
-              <IconButton key={from} icon={icon} label={label} onPress={() => void take(from)} />
-            ))}
-          </View>
+          {onChange ? (
+            <>
+              <View style={{ position: "absolute", top: spacing.xs, right: spacing.xs }}>
+                <IconButton icon={X} label={tr.photos.remove} onPress={() => onChange(null)} />
+              </View>
+              <View style={{ position: "absolute", bottom: spacing.xs, right: spacing.xs, flexDirection: "row" }}>
+                {sources.map(([icon, label, from]) => (
+                  <IconButton key={from} icon={icon} label={label} onPress={() => void take(from)} />
+                ))}
+              </View>
+            </>
+          ) : null}
         </View>
       ) : (
         <View style={{ flexDirection: "row", gap: spacing.sm }}>

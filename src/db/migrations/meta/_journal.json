@@ -29,6 +29,27 @@
       "when": 1792712809564,
       "tag": "0003_cabinet_members",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792747339714,
+      "tag": "0004_household_photo",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792749157560,
+      "tag": "0005_who_changed",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792749511537,
+      "tag": "0006_box_check",
+      "breakpoints": true
     }
   ]
 }

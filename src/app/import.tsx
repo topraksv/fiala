@@ -13,7 +13,6 @@ import FileUp from "lucide-react-native/icons/file-up";
 import Package from "lucide-react-native/icons/package";
 import TriangleAlert from "lucide-react-native/icons/triangle-alert";
 
-import { useSession } from "../auth/session";
 import { hasBox, importBoxes } from "../data/cabinet";
 import { useSettings } from "../data/hooks";
 import { giveHealthConsent, hasHealthConsent } from "../data/settings";
@@ -25,6 +24,7 @@ import { tr } from "../i18n/tr";
 import { readPickedText, UserFacingError } from "../services/picked-file";
 import { Body, Button, Card, ListRow, Notice, Screen, SectionHeader } from "../ui/components";
 import { appConfirm, appPrompt } from "../ui/dialog";
+import { CabinetChoice, useCabinetChoice } from "../ui/named-choices";
 import { navigateBack } from "../ui/navigation";
 import { spacing } from "../ui/theme";
 import { showUndo } from "../ui/undo";
@@ -50,7 +50,7 @@ async function heldRows(raws: readonly ImportRaw[]): Promise<Set<number>> {
 
 export default function ImportScreen() {
   const router = useRouter();
-  const cabinetId = useSession((s) => s.userId);
+  const { open, own, setOwn, cabinetId } = useCabinetChoice();
   const settings = useSettings();
   const [file, setFile] = useState<{ name: string; ignored: string[] } | null>(null);
   const [raws, setRaws] = useState<ImportRaw[]>([]);
@@ -119,6 +119,7 @@ export default function ImportScreen() {
   return (
     <Screen back="/cabinet" title={tr.importFile.title} width="form">
       <Body muted style={{ marginBottom: spacing.md }}>{tr.importFile.hint}</Body>
+      <CabinetChoice household={open} own={own} onChoose={setOwn} />
       <View style={{ alignItems: "flex-start", marginBottom: spacing.md }}>
         <Button label={file ? tr.importFile.pickAnother : tr.importFile.pick} icon={FileUp} variant={file ? "ghost" : "secondary"} onPress={() => void pick()} />
       </View>

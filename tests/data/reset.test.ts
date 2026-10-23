@@ -15,7 +15,7 @@ vi.mock("../../src/db/client", async () => {
 
 vi.mock("expo-crypto", async () => (await import("../helpers")).expoCryptoMock);
 
-const { HEALTH_CONSENT, chooseProfile, giveHealthConsent, hasHealthConsent, isFrozen, profileChoice, readSettings, setAccountFrozen, writeSetting } = await import("../../src/data/settings");
+const { HEALTH_CONSENT, chooseHousehold, chooseProfile, giveHealthConsent, hasHealthConsent, isFrozen, openHouseholdOf, profileChoice, readSettings, setAccountFrozen, writeSetting } = await import("../../src/data/settings");
 const { RESET_SCOPES, countDataReset, resetData } = await import("../../src/data/reset");
 const { addPackage, takeFrom } = await import("../../src/data/cabinet");
 const { migratedDatabase } = await import("../helpers");
@@ -58,29 +58,63 @@ describe("resetting the data", () => {
 
   it("holds the consent only at its version, and never from a value it cannot read", async () => {
     expect(hasHealthConsent([])).toBe(false);
-    expect(hasHealthConsent([{ key: HEALTH_CONSENT, value: '{"version":1,"at":"x"}' }])).toBe(true);
-    for (const value of ['{"version":2}', "{", "null", "1"]) expect(hasHealthConsent([{ key: HEALTH_CONSENT, value }]), value).toBe(false);
-    expect(hasHealthConsent([{ key: "other", value: '{"version":1}' }])).toBe(false);
-    expect(hasHealthConsent([{ key: "account_frozen", value: "true" }, { key: HEALTH_CONSENT, value: '{"version":1}' }]), "found among the others").toBe(true);
+    expect(hasHealthConsent([{ key: HEALTH_CONSENT, value: '{"version":2,"at":"x"}' }])).toBe(true);
+    // 1 was given before a household's members could read the boxes.
+    for (const value of ['{"version":1}', '{"version":3}', "{", "null", "1"]) expect(hasHealthConsent([{ key: HEALTH_CONSENT, value }]), value).toBe(false);
+    expect(hasHealthConsent([{ key: "other", value: '{"version":2}' }])).toBe(false);
+    expect(hasHealthConsent([{ key: "account_frozen", value: "true" }, { key: HEALTH_CONSENT, value: '{"version":2}' }]), "found among the others").toBe(true);
     // The stored key: renamed, every consent already given is forgotten.
     expect(HEALTH_CONSENT).toBe("health_consent");
     expect([isFrozen([{ key: HEALTH_CONSENT, value: "true" }]), isFrozen([{ key: "account_frozen", value: "false" }])], "no other setting freezes").toEqual([false, false]);
   });
 
-  it("keeps who the account is and a new box's owner and place apart, each only while it exists", async () => {
+  it("keeps who the account is and a new box's owner and place apart, in each cabinet, each only while it exists", async () => {
     const named = [{ id: "me" }, { id: "child" }, { id: "shelf" }];
-    expect(profileChoice(await readSettings(), "me", named), "none chosen").toBeNull();
-    await chooseProfile("me", "me");
-    await chooseProfile("owner", "child");
-    await chooseProfile("place", "shelf");
+    const ev = [{ id: "ali" }];
+    expect(profileChoice(await readSettings(), "me", "mine", named), "none chosen").toBeNull();
+    await chooseProfile("me", "mine", "me");
+    await chooseProfile("owner", "mine", "child");
+    await chooseProfile("place", "mine", "shelf");
+    await chooseProfile("owner", "ev", "ali");
     const all = await readSettings();
-    expect([profileChoice(all, "me", named), profileChoice(all, "owner", named), profileChoice(all, "place", named)]).toEqual(["me", "child", "shelf"]);
-    expect(profileChoice(all, "owner", [{ id: "me" }]), "deleted since").toBeNull();
-    await chooseProfile("owner", null);
-    expect(profileChoice(await readSettings(), "owner", named), "chosen back to no one").toBeNull();
+    expect([profileChoice(all, "me", "mine", named), profileChoice(all, "owner", "mine", named), profileChoice(all, "place", "mine", named)]).toEqual(["me", "child", "shelf"]);
+    expect([profileChoice(all, "owner", "ev", ev), profileChoice(all, "owner", "ev", named), profileChoice(all, "owner", null, named)], "a household's own, never another's").toEqual(["ali", null, null]);
+    expect(profileChoice(all, "owner", "mine", [{ id: "me" }]), "deleted since").toBeNull();
+    await chooseProfile("owner", "mine", null);
+    const after = await readSettings();
+    expect([profileChoice(after, "owner", "mine", named), profileChoice(after, "owner", "ev", ev)], "chosen back to no one, the household's kept").toEqual([null, "ali"]);
     // The stored keys: renamed, every account's choice is forgotten.
-    expect((await readSettings()).map(({ key }) => key).sort()).toEqual(["default_location", "default_person", "profile_person"]);
-    expect(profileChoice([{ key: "profile_person", value: "{" }], "me", named), "unreadable").toBeNull();
+    expect(after.map(({ key }) => key).sort()).toEqual(["default_location", "default_person", "profile_person"]);
+    expect(profileChoice([{ key: "profile_person", value: "{" }], "me", "mine", named), "unreadable").toBeNull();
+    expect(profileChoice([{ key: "other", value: '{"mine":"me"}' }, { key: "profile_person", value: "null" }], "me", "mine", named), "another key's, or none").toBeNull();
+  });
+
+  it("moves a choice kept the old way, one id, under its own cabinet when another cabinet's is chosen", async () => {
+    harness.db!.exec(`INSERT INTO people (id, cabinet_id, created_at, updated_at, name) VALUES ('child', 'mine', 'x', 'x', 'Ece')`);
+    harness.db!.exec(`INSERT INTO locations (id, cabinet_id, created_at, updated_at, name) VALUES ('shelf', 'mine', 'x', 'x', 'Raf')`);
+    const stored = async (key: string) => JSON.parse((await readSettings()).find((each) => each.key === key)!.value) as unknown;
+    for (const [choice, key, id] of [["me", "profile_person", "child"], ["owner", "default_person", "child"], ["place", "default_location", "shelf"]] as const) {
+      await writeSetting(key, id);
+      expect(profileChoice(await readSettings(), choice, "mine", [{ id }]), `${choice}: read as before`).toBe(id);
+      expect(profileChoice(await readSettings(), choice, "ev", [{ id: "ali" }]), `${choice}: in no household`).toBeNull();
+      await chooseProfile(choice, "ev", "ali");
+      expect(await stored(key), choice).toEqual({ mine: id, ev: "ali" });
+    }
+    await writeSetting("default_person", "gone");
+    await chooseProfile("owner", "ev", "ali");
+    expect(await stored("default_person"), "one whose person is gone is let go").toEqual({ ev: "ali" });
+  });
+
+  it("opens the household chosen, else the first, and none when there is none", async () => {
+    const households = [{ id: "ev" }, { id: "yazlik" }];
+    expect(openHouseholdOf(await readSettings(), households), "none chosen").toBe(households[0]);
+    expect(openHouseholdOf([{ key: "other", value: '"yazlik"' }], households), "another setting chooses none").toBe(households[0]);
+    await chooseHousehold("yazlik");
+    expect(openHouseholdOf(await readSettings(), households)).toBe(households[1]);
+    expect(openHouseholdOf(await readSettings(), [{ id: "ev" }]), "gone since").toEqual({ id: "ev" });
+    expect(openHouseholdOf(await readSettings(), []), "no household").toBeNull();
+    expect(openHouseholdOf([{ key: "open_household", value: "{" }], households), "unreadable").toBe(households[0]);
+    expect((await readSettings()).map(({ key }) => key), "the stored key: renamed, every account's choice is forgotten").toEqual(["open_household"]);
   });
 
   it("counts and takes nothing when nothing is chosen, and never the settings", async () => {

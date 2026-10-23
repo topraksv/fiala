@@ -6,14 +6,15 @@ import Archive from "lucide-react-native/icons/archive";
 import FileUp from "lucide-react-native/icons/file-up";
 import LayoutList from "lucide-react-native/icons/layout-list";
 import FolderInput from "lucide-react-native/icons/folder-input";
+import House from "lucide-react-native/icons/house";
 import Package from "lucide-react-native/icons/package";
 import Pill from "lucide-react-native/icons/pill";
 import Plus from "lucide-react-native/icons/plus";
 import Trash from "lucide-react-native/icons/trash";
 import X from "lucide-react-native/icons/x";
 
-import { editBoxes, type CabinetBox, type CabinetProduct, type Named, type NamedTable } from "../../data/cabinet";
-import { useCabinet, useLocations, usePeople, useTags } from "../../data/hooks";
+import { editBoxes, type CabinetBox, type CabinetProduct, type Household, type Named, type NamedTable } from "../../data/cabinet";
+import { useHouseholds, useLocations, usePeople, useShownCabinet, useTags } from "../../data/hooks";
 import { BOX_VIEWS, SOON_DAYS, boxExpiry, expiryState, formatAmount, formatDay, inView, lastOpenDay, localDay, matchesSearch, sortProducts, type BoxView } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
 import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, Screen, TextField } from "../../ui/components";
@@ -64,10 +65,11 @@ function visible(products: readonly CabinetProduct[], { query, sort, view, perso
 export default function Cabinet() {
   const router = useRouter();
   const { palette } = useTheme();
-  const cabinet = useCabinet();
-  const people = usePeople();
-  const locations = useLocations();
-  const tags = useTags();
+  const cabinet = useShownCabinet();
+  const { open, shows, writes } = useHouseholds();
+  const people = usePeople().data.filter((each) => shows(each.cabinetId));
+  const locations = useLocations().data.filter((each) => shows(each.cabinetId));
+  const tags = useTags().data.filter((each) => shows(each.cabinetId));
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("expiry");
   const [whose, setWhose] = useState<string | null>(null);
@@ -109,20 +111,21 @@ export default function Cabinet() {
       box.disposition ? tr.cabinet.dispositions[box.disposition] : undefined,
       openUntil ? tr.cabinet.openUntil(formatDay(openUntil)) : undefined,
       box.counted ? tr.cabinet.remaining(formatAmount(box.remainingMilli), tr.units[box.unit]) : tr.cabinet.uncounted,
-      nameOf(people.data, box.personId),
-      nameOf(locations.data, box.locationId),
+      nameOf(people, box.personId),
+      nameOf(locations, box.locationId),
     );
   };
 
   // A name deleted since it was chosen filters nothing.
-  const person = people.data.some((each) => each.id === whose) ? whose : null;
-  const place = locations.data.some((each) => each.id === where) ? where : null;
+  const person = people.some((each) => each.id === whose) ? whose : null;
+  const place = locations.some((each) => each.id === where) ? where : null;
   const anyStarred = cabinet.data.some((product) => product.starred);
   // A product only on the to-buy list has nothing to show here.
   const holding = cabinet.data.some((product) => product.boxes.length > 0);
-  const tag = (filed === STARRED && anyStarred) || tags.data.some((each) => each.id === filed) ? filed : null;
-  const shown = visible(cabinet.data, { query, sort, view, person, place, tag, today, ownerOf: (id) => nameOf(people.data, id) });
-  const selection = useSelection(shown.flatMap((product) => product.boxes));
+  const tag = (filed === STARRED && anyStarred) || tags.some((each) => each.id === filed) ? filed : null;
+  const shown = visible(cabinet.data, { query, sort, view, person, place, tag, today, ownerOf: (id) => nameOf(people, id) });
+  // A box of a household the person only reads is never chosen: everything chosen is changed.
+  const selection = useSelection(shown.flatMap((product) => product.boxes).filter((box) => writes(box.cabinetId)));
   const chosenIds = () => selection.chosen.map((box) => box.id);
 
   // Both leave the boxes' rows to the undo bar: the selection ends as they go.
@@ -181,6 +184,7 @@ export default function Cabinet() {
 
   return (
     <Screen title={header.title} actions={header.actions}>
+      <OpenHousehold household={open} />
       {!holding ? (
         <EmptyState
           icon={BriefcaseMedical}
@@ -224,9 +228,9 @@ export default function Cabinet() {
               </View>
             ))}
           </View>
-          <Filter table="people" named={people.data} chosen={person} onChoose={setWhose} />
-          <Filter table="locations" named={locations.data} chosen={place} onChoose={setWhere} />
-          <Filter table="tags" named={tags.data} first={anyStarred ? [{ id: STARRED, name: tr.cabinet.starred }] : []} chosen={tag} onChoose={setFiled} />
+          <Filter table="people" named={people} chosen={person} onChoose={setWhose} />
+          <Filter table="locations" named={locations} chosen={place} onChoose={setWhere} />
+          <Filter table="tags" named={tags} first={anyStarred ? [{ id: STARRED, name: tr.cabinet.starred }] : []} chosen={tag} onChoose={setFiled} />
           {shown.length === 0 ? <Body muted>{query.trim() ? tr.cabinet.noMatch(query.trim()) : tr.cabinet.noFiltered}</Body> : null}
           {shown.map((product) => (
             <Card key={product.id} rows>
@@ -235,16 +239,19 @@ export default function Cabinet() {
                 iconColor={compact ? warning(product.boxes) : undefined}
                 title={tr.common.joined(product.name, product.strength ?? undefined)}
                 subtitle={tr.common.joined(
+                  // Whose cabinet, once there are two to tell apart.
+                  open ? (product.cabinetId === open.id ? open.name : tr.households.private) : undefined,
                   tr.cabinet.boxes(product.boxes.length),
                   // The short list keeps a product's soonest day, which its first box carries.
                   compact && product.boxes[0]?.expiresOn ? tr.cabinet.expires(formatDay(product.boxes[0].expiresOn)) : undefined,
-                  ...new Set(product.boxes.map((box) => nameOf(people.data, box.personId))),
+                  ...new Set(product.boxes.map((box) => nameOf(people, box.personId))),
                   product.activeSubstance ?? undefined,
                 )}
                 chevron
                 onPress={() => router.push({ pathname: "/product/[id]", params: { id: product.id } })}
               />
               {compact ? null : product.boxes.map((box) => {
+                const choosable = writes(box.cabinetId);
                 return (
                   <ListRow
                     key={box.id}
@@ -253,9 +260,9 @@ export default function Cabinet() {
                     title={box.expiresOn ? tr.common.joined(tr.cabinet.expires(formatDay(box.expiresOn)), tr.cabinet.expiryStates[expiryState(box.expiresOn, today, box.soonDays ?? SOON_DAYS)]) : tr.cabinet.noExpiry}
                     subtitle={subtitle(box)}
                     chevron
-                    onPress={() => (selection.active ? selection.toggle(box.id) : router.push({ pathname: "/box/[id]", params: { id: box.id } }))}
-                    onLongPress={() => selection.begin(box.id)}
-                    selected={selection.active ? selection.has(box.id) : undefined}
+                    onPress={() => (selection.active && choosable ? selection.toggle(box.id) : router.push({ pathname: "/box/[id]", params: { id: box.id } }))}
+                    onLongPress={choosable ? () => selection.begin(box.id) : undefined}
+                    selected={selection.active && choosable ? selection.has(box.id) : undefined}
                   />
                 );
               })}
@@ -264,6 +271,16 @@ export default function Cabinet() {
         </>
       )}
     </Screen>
+  );
+}
+
+/** The household shown beside the person's own boxes, and the way to another (F2.4). */
+function OpenHousehold({ household }: { household: Household | null }) {
+  const router = useRouter();
+  return (
+    <Card rows>
+      <ListRow icon={House} title={household?.name ?? tr.households.none} subtitle={household ? tr.households.people(household.members) : tr.households.noneHint} chevron onPress={() => router.push("/households")} />
+    </Card>
   );
 }
 

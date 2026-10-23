@@ -13,13 +13,14 @@ import Star from "lucide-react-native/icons/star";
 import Tag from "lucide-react-native/icons/tag";
 import TagPlus from "lucide-react-native/icons/tag-plus";
 
-import { addNamed, editProduct, setPhoto, tagProduct, type CabinetBox, type ProductFields } from "../../data/cabinet";
-import { useCabinet, usePeople, useTags } from "../../data/hooks";
+import { addNamed, editProduct, setPhoto, tagProduct, type CabinetBox, type Named, type ProductFields } from "../../data/cabinet";
+import { useCabinet, useHouseholds, usePeople, useTags } from "../../data/hooks";
 import { formatAmount, formatDay, printedGtin } from "../../domain/boxes";
+import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
 import { Button, Card, IconButton, ListRow, Notice, Screen, SectionHeader, ToggleRow } from "../../ui/components";
 import { appError, appPrompt } from "../../ui/dialog";
-import { PersonMark } from "../../ui/named-choices";
+import { PersonMark, ViewOnly } from "../../ui/named-choices";
 import { PhotoField } from "../../ui/photo-field";
 import { spacing } from "../../ui/theme";
 
@@ -49,6 +50,7 @@ export default function ProductScreen() {
   const cabinet = useCabinet();
   const people = usePeople();
   const allTags = useTags();
+  const { writes } = useHouseholds();
   const product = cabinet.data.find((each) => each.id === id);
   const tags = allTags.data.filter((tag) => tag.cabinetId === product?.cabinetId);
 
@@ -60,6 +62,9 @@ export default function ProductScreen() {
     );
   }
 
+  const editable = writes(product.cabinetId);
+  // What only someone who may change the product is given.
+  const changing = <T,>(control: T) => (editable ? control : undefined);
   const attempt = async (write: () => Promise<unknown>) => {
     try {
       await write();
@@ -97,8 +102,9 @@ export default function ProductScreen() {
     <Screen
       back="/cabinet"
       title={product.name}
-      actions={<IconButton icon={Star} label={tr.product.star} on={product.starred} onPress={() => void attempt(() => editProduct(product.id, { starred: !product.starred }))} />}
+      actions={changing(<IconButton icon={Star} label={tr.product.star} on={product.starred} onPress={() => void attempt(() => editProduct(product.id, { starred: !product.starred }))} />)}
     >
+      <ViewOnly cabinetId={product.cabinetId} />
       <SectionHeader>{tr.product.totalSection}</SectionHeader>
       <Card rows>
         <ListRow title={tr.product.total(totals(home) ?? tr.cabinet.uncounted)} subtitle={tr.cabinet.boxes(home.length)} />
@@ -113,9 +119,11 @@ export default function ProductScreen() {
             ))
           : null}
       </Card>
-      <Card rows>
-        <ToggleRow title={tr.product.wanted} subtitle={tr.product.wantedHint} value={product.wanted} onValueChange={(wanted) => void attempt(() => editProduct(product.id, { wanted }))} />
-      </Card>
+      {editable ? (
+        <Card rows>
+          <ToggleRow title={tr.product.wanted} subtitle={tr.product.wantedHint} value={product.wanted} onValueChange={(wanted) => void attempt(() => editProduct(product.id, { wanted }))} />
+        </Card>
+      ) : null}
 
       <SectionHeader>{tr.product.boxesSection}</SectionHeader>
       <Card rows>
@@ -134,33 +142,56 @@ export default function ProductScreen() {
           />
         ))}
       </Card>
-      <View style={{ marginBottom: spacing.lg }}>
-        <Button label={tr.product.addBox} icon={Plus} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { product: product.id } })} />
-      </View>
-
-      <SectionHeader>{tr.product.tagsSection}</SectionHeader>
-      {tags.length > 0 ? (
-        <Card rows>
-          {tags.map((tag) => {
-            const on = product.tagIds.includes(tag.id);
-            return <ListRow key={tag.id} icon={Tag} title={tag.name} selected={on} onPress={() => void attempt(() => tagProduct(product.id, tag.id, !on))} />;
-          })}
-        </Card>
+      {editable ? (
+        <View style={{ marginBottom: spacing.lg }}>
+          <Button label={tr.product.addBox} icon={Plus} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { product: product.id } })} />
+        </View>
       ) : null}
-      <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
-        <Button label={tr.names.add.tags} icon={TagPlus} variant="ghost" size="sm" onPress={() => void addTag()} />
-      </View>
 
-      <PhotoField name={product.name} photoId={product.photoId} thumb={product.thumb} onChange={(photo) => void attempt(() => setPhoto("products", product.id, photo))} />
+      {editable ? (
+        <>
+          <SectionHeader>{tr.product.tagsSection}</SectionHeader>
+          {tags.length > 0 ? (
+            <Card rows>
+              {tags.map((tag) => {
+                const on = product.tagIds.includes(tag.id);
+                return <ListRow key={tag.id} icon={Tag} title={tag.name} selected={on} onPress={() => void attempt(() => tagProduct(product.id, tag.id, !on))} />;
+              })}
+            </Card>
+          ) : null}
+          <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
+            <Button label={tr.names.add.tags} icon={TagPlus} variant="ghost" size="sm" onPress={() => void addTag()} />
+          </View>
+        </>
+      ) : (
+        <ReadTags tags={tags.filter((tag) => product.tagIds.includes(tag.id))} />
+      )}
+
+      <PhotoField name={product.name} photoId={product.photoId} thumb={product.thumb} onChange={changing((photo: NewPhoto | null) => void attempt(() => setPhoto("products", product.id, photo)))} />
 
       <SectionHeader>{tr.product.detailsSection}</SectionHeader>
       <Card rows>
         {FIELDS.map(([field, label, maxLength]) => (
-          <ListRow key={field} title={label} subtitle={product[field] ?? tr.box.unknown} chevron onPress={() => void change(field, label, maxLength)} />
+          <ListRow key={field} title={label} subtitle={product[field] ?? tr.box.unknown} chevron={editable} onPress={changing(() => void change(field, label, maxLength))} />
         ))}
         {product.gtin ? <ListRow title={tr.addBox.barcode} subtitle={printedGtin(product.gtin)} /> : null}
-        <ListRow title={tr.product.note} subtitle={product.note ?? tr.product.noteEmpty} chevron onPress={() => void change("note", tr.product.note, 2000)} />
+        <ListRow title={tr.product.note} subtitle={product.note ?? tr.product.noteEmpty} chevron={editable} onPress={changing(() => void change("note", tr.product.note, 2000))} />
       </Card>
     </Screen>
+  );
+}
+
+/** Read, a product's tags are the ones it has: every tag is listed only to be put on. */
+function ReadTags({ tags }: { tags: readonly Named[] }) {
+  if (tags.length === 0) return null;
+  return (
+    <>
+      <SectionHeader>{tr.product.tagsSection}</SectionHeader>
+      <Card rows>
+        {tags.map((tag) => (
+          <ListRow key={tag.id} icon={Tag} title={tag.name} />
+        ))}
+      </Card>
+    </>
   );
 }

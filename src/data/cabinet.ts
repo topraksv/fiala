@@ -10,7 +10,7 @@ import { uuidv7 } from "uuidv7";
 import { getSqliteAsync } from "../db/client";
 import { deterministicId, naturalKeys } from "../db/ids";
 import { editRow, findRow, fromDbShape, nowIso, writeRows, writeUndoable, type RowsWritten, type RowWrite } from "../db/mutations";
-import type { MOVE_REASONS, PACKAGE_DISPOSITIONS, PACKAGE_UNITS, PERSON_COLORS } from "../db/schema";
+import type { MemberRole, MOVE_REASONS, PACKAGE_DISPOSITIONS, PACKAGE_UNITS, PERSON_COLORS, PERSON_KINDS } from "../db/schema";
 import { foldName } from "../domain/boxes";
 import type { ImportedBox } from "../domain/import";
 import { photoColumn, type NewPhoto } from "./photos";
@@ -43,6 +43,8 @@ export interface PackageFields {
   disposition?: (typeof PACKAGE_DISPOSITIONS)[number] | null;
   warnDays?: number | null;
   photoId?: string | null;
+  checkOf?: string | null;
+  checkAskedAt?: string | null;
 }
 
 type MoveReason = (typeof MOVE_REASONS)[number];
@@ -126,6 +128,79 @@ export async function importBoxes(cabinetId: string, boxes: readonly ImportedBox
     return writes;
   });
   return written.writes.length > 0 ? written : null;
+}
+
+/**
+ * The product a moved box is of in `cabinetId`: by GTIN as a new box finds
+ * it, else one of the same name and strength, so a box moved back finds the
+ * product it left. Its note, photo, star and tags stay with the product left
+ * behind, which may still hold other boxes.
+ */
+async function productThere(cabinetId: string, product: Record<string, unknown>): Promise<{ id: string; writes: RowWrite[] }> {
+  const { name, brand, activeSubstance, strength, form, pack, manufacturer, gtin } = fromDbShape("products", product) as unknown as ProductFields;
+  if (!gtin) {
+    const sqlite = await getSqliteAsync();
+    const same = await sqlite.getAllAsync<{ id: string; name: string; strength: string | null }>(
+      "SELECT id, name, strength FROM products WHERE cabinet_id = ? AND gtin IS NULL AND deleted_at IS NULL",
+      [cabinetId],
+    );
+    const twin = same.find((each) => foldName(each.name) === foldName(name) && (each.strength ?? "") === (strength ?? ""));
+    if (twin) return { id: twin.id, writes: [] };
+  }
+  return productWrite(cabinetId, { name, brand, activeSubstance, strength, form, pack, manufacturer, gtin });
+}
+
+/**
+ * Move a box to another cabinet (`docs/TASKS.md` F2.5): private is the
+ * person's own cabinet, not a column, so the box is tombstoned where it was
+ * and made afresh there, and every device that held it hears it went. Made
+ * private, it keeps its moves and its history. Into a household it arrives
+ * now with what it holds, and nothing older: its edits keep every value it
+ * ever had, a note deleted since among them, and every member would read
+ * them, its arrival dated to its purchase. Its person and place were the old cabinet's: the
+ * one of the same name there is taken, or made, as an import does. Its new
+ * id, and one write `undoRows` takes back whole; `null` when there was
+ * nothing to move.
+ */
+export async function moveBox(packageId: string, cabinetId: string): Promise<{ id: string; written: RowsWritten } | null> {
+  const id = uuidv7();
+  const written = await writeUndoable(async () => {
+    const box = await findRow("packages", packageId);
+    if (!box || box.deleted_at != null || box.cabinet_id === cabinetId) return [];
+    // A box's product is never deleted from under it, only tombstoned.
+    const product = (await findRow("products", String(box.product_id)))!;
+    const sqlite = await getSqliteAsync();
+    const { id: productId, writes } = await productThere(cabinetId, product);
+    const sameName = async (table: NamedTable, id: unknown) => {
+      const named = await readNamed(table);
+      const from = named.find((each) => each.id === id);
+      if (!from) return null;
+      const there = named.find((each) => each.cabinetId === cabinetId && foldName(each.name) === foldName(from.name));
+      if (there) return there.id;
+      const made = uuidv7();
+      writes.push({ table, row: { id: made, cabinetId, name: from.name } });
+      return made;
+    };
+    const { tombstoneVersion: _, ...shape } = fromDbShape("packages", box);
+    // An open ask to check it was made of the household it leaves.
+    writes.push({ table: "packages", row: { ...shape, id, cabinetId, productId, personId: await sameName("people", box.person_id), locationId: await sameName("locations", box.location_id), checkOf: null, checkAskedAt: null } });
+    const household = await sqlite.getFirstAsync<{ id: string }>("SELECT id FROM cabinets WHERE id = ? AND id <> owner_id", [cabinetId]);
+    if (household) {
+      const held = await sqlite.getFirstAsync<{ total: number }>("SELECT COALESCE(SUM(quantity_milli), 0) AS total FROM package_moves WHERE package_id = ? AND deleted_at IS NULL", [packageId]);
+      if (held && held.total > 0) writes.push(moveWrite(cabinetId, id, held.total, "initial"));
+    } else {
+      for (const table of ["package_moves", "package_changes"] as const) {
+        for (const row of await sqlite.getAllAsync<Record<string, unknown>>(`SELECT * FROM ${table} WHERE package_id = ? AND deleted_at IS NULL`, [packageId])) {
+          const { tombstoneVersion: __, ...copy } = fromDbShape(table, row);
+          // The server names the mover as the copy's writer (migration 11): until the pull brings that, nobody rather than a name it will not keep.
+          writes.push({ table, row: { ...copy, id: uuidv7(), cabinetId, packageId: id, createdBy: null } });
+        }
+      }
+    }
+    writes.push({ table: "packages", row: { ...shape, deletedAt: nowIso() } });
+    return writes;
+  });
+  return written.writes.length > 0 ? { id, written } : null;
 }
 
 function moveWrite(cabinetId: string, packageId: string, quantityMilli: number, reason: MoveReason): RowWrite {
@@ -214,13 +289,15 @@ export interface BoxMove {
   quantityMilli: number;
   reason: MoveReason;
   createdAt: string;
+  /** Who wrote it, once the server has it (F2.8). */
+  createdBy: string | null;
 }
 
 /** A box's moves, newest first: its own history of what was used, added and counted. */
 export async function readMoves(packageId: string): Promise<BoxMove[]> {
   const sqlite = await getSqliteAsync();
   return sqlite.getAllAsync<BoxMove>(
-    `SELECT id, quantity_milli AS quantityMilli, reason, created_at AS createdAt FROM package_moves
+    `SELECT id, quantity_milli AS quantityMilli, reason, created_at AS createdAt, created_by AS createdBy FROM package_moves
       WHERE package_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC`,
     [packageId],
   );
@@ -270,21 +347,92 @@ export interface BoxChange {
   /** Each field changed, as `[before, after]`. */
   changes: Record<string, [unknown, unknown]>;
   createdAt: string;
+  createdBy: string | null;
 }
 
 /** A box's edits, newest first; its moves are the rest of its history. */
 export async function readChanges(packageId: string): Promise<BoxChange[]> {
   const sqlite = await getSqliteAsync();
-  const rows = await sqlite.getAllAsync<{ id: string; changes: string; createdAt: string }>(
-    `SELECT id, changes, created_at AS createdAt FROM package_changes
+  const rows = await sqlite.getAllAsync<{ id: string; changes: string; createdAt: string; createdBy: string | null }>(
+    `SELECT id, changes, created_at AS createdAt, created_by AS createdBy FROM package_changes
       WHERE package_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC`,
     [packageId],
   );
   return rows.map((row) => ({ ...row, changes: JSON.parse(row.changes) as BoxChange["changes"] }));
 }
 
-/** A person's, a product's or a box's photo, or with `null` taken off; a box records it in its history. */
-export async function setPhoto(table: "people" | "products" | "packages", id: string, change: NewPhoto | null): Promise<void> {
+/** One thing a household's centre says; `count` boxes added together, `boxId` the one when it is one. */
+export interface HouseholdEvent {
+  kind: "memberJoined" | "boxAdded" | "boxLeft";
+  at: string;
+  /** The member who did it, by the name they joined with. */
+  byName: string | null;
+  /** The household's name for one who joined, else the box's. */
+  name: string;
+  count: number;
+  cabinetId: string;
+  boxId: string | null;
+}
+
+/** One move or edit in a household's history (`docs/TASKS.md` F2.8), with the box it was made on. */
+export interface Activity {
+  id: string;
+  at: string;
+  by: string | null;
+  boxId: string;
+  name: string;
+  unit: PackageFields["unit"];
+  /** A move's; null for an edit. */
+  reason: MoveReason | null;
+  quantityMilli: number | null;
+  /** An edit's; null for a move. */
+  changes: BoxChange["changes"] | null;
+}
+
+/**
+ * What happened in the person's households that the centre tells them
+ * (`docs/TASKS.md` F2.11): someone joined after them, and boxes another member
+ * added, a day's at once, or took out of the cabinet. Worked out from the rows
+ * on the device, as the reminders are; the server names each writer.
+ */
+export async function readHouseholdEvents(me: string): Promise<HouseholdEvent[]> {
+  const sqlite = await getSqliteAsync();
+  const box = "JOIN packages b ON b.id = h.package_id AND b.deleted_at IS NULL JOIN products p ON p.id = b.product_id";
+  const by = "(SELECT name FROM cabinet_members WHERE cabinet_id = h.cabinet_id AND user_id = h.created_by)";
+  const others = `h.deleted_at IS NULL AND h.created_by IS NOT NULL AND h.created_by <> ? AND ${inLiveCabinet("h.cabinet_id")}`;
+  return sqlite.getAllAsync<HouseholdEvent>(
+    `SELECT 'memberJoined' AS kind, m.created_at AS at, m.name AS byName, c.name AS name, 1 AS count, c.id AS cabinetId, NULL AS boxId
+       FROM cabinet_members m JOIN cabinet_members mine ON mine.cabinet_id = m.cabinet_id AND mine.user_id = ? AND mine.deleted_at IS NULL
+       JOIN cabinets c ON c.id = m.cabinet_id AND c.deleted_at IS NULL
+      WHERE m.deleted_at IS NULL AND m.user_id <> ? AND m.created_at > mine.created_at
+     UNION ALL
+     SELECT 'boxAdded', MAX(h.created_at), ${by}, MIN(COALESCE(b.nickname, p.name)), COUNT(*), h.cabinet_id, MIN(b.id)
+       FROM package_moves h ${box} WHERE h.reason = 'initial' AND ${others}
+      GROUP BY h.cabinet_id, h.created_by, substr(h.created_at, 1, 10)
+     UNION ALL
+     SELECT 'boxLeft', h.created_at, ${by}, COALESCE(b.nickname, p.name), 1, h.cabinet_id, b.id
+       FROM package_changes h ${box} WHERE json_extract(h.changes, '$.disposition[1]') IS NOT NULL AND ${others}`,
+    [me, me, me, me],
+  );
+}
+
+/** A cabinet's latest moves and edits on its live boxes, newest first. */
+export async function readActivity(cabinetId: string, limit = 30): Promise<Activity[]> {
+  const sqlite = await getSqliteAsync();
+  const on = "JOIN packages b ON b.id = h.package_id AND b.deleted_at IS NULL JOIN products p ON p.id = b.product_id";
+  const what = "h.id AS id, h.created_at AS at, h.created_by AS by, h.package_id AS boxId, COALESCE(b.nickname, p.name) AS name, b.unit";
+  const rows = await sqlite.getAllAsync<Omit<Activity, "changes"> & { changes: string | null }>(
+    `SELECT ${what}, h.reason, h.quantity_milli AS quantityMilli, NULL AS changes FROM package_moves h ${on} WHERE h.cabinet_id = ? AND h.deleted_at IS NULL
+     UNION ALL
+     SELECT ${what}, NULL, NULL, h.changes FROM package_changes h ${on} WHERE h.cabinet_id = ? AND h.deleted_at IS NULL
+     ORDER BY at DESC, id DESC LIMIT ?`,
+    [cabinetId, cabinetId, limit],
+  );
+  return rows.map((row) => ({ ...row, changes: row.changes == null ? null : (JSON.parse(row.changes) as BoxChange["changes"]) }));
+}
+
+/** A person's, a product's, a box's or a household's photo, or with `null` taken off; a box records it in its history. */
+export async function setPhoto(table: "people" | "products" | "packages" | "cabinets", id: string, change: NewPhoto | null): Promise<void> {
   return writeRows(async () => {
     const there = await findRow(table, id);
     if (!there || there.deleted_at != null) return [];
@@ -293,12 +441,20 @@ export async function setPhoto(table: "people" | "products" | "packages", id: st
   });
 }
 
+/**
+ * A deleted household's rows stay live under its tombstone, as Gital's list's
+ * items do, until sync lets the household go a week later; every read leaves
+ * them out. Written as "not in a deleted one", since the person's own cabinet
+ * reaches a device only with its first pull.
+ */
+const inLiveCabinet = (column: string) => `${column} NOT IN (SELECT id FROM cabinets WHERE deleted_at IS NOT NULL)`;
+
 /** Every product with a box in it or still to be bought, by name, each box soonest to expire first. */
 export async function readCabinet(): Promise<CabinetProduct[]> {
   const sqlite = await getSqliteAsync();
   // A photo's bytes stay out of the list: the thumbnail alone, and none until it has reached this device.
   const products = await sqlite.getAllAsync<Record<string, unknown> & { thumb: string | null }>(
-    "SELECT p.*, (SELECT thumb FROM photos WHERE id = p.photo_id) AS thumb FROM products p WHERE p.deleted_at IS NULL",
+    `SELECT p.*, (SELECT thumb FROM photos WHERE id = p.photo_id) AS thumb FROM products p WHERE p.deleted_at IS NULL AND ${inLiveCabinet("p.cabinet_id")}`,
   );
   // A box near its end as many days ahead as it was given, else as its owner was.
   const boxes = await sqlite.getAllAsync<Record<string, unknown> & { total: number; moves: number; thumb: string | null; soonDays: number | null; movedAt: string | null }>(
@@ -345,7 +501,7 @@ export async function hasBox(gtin: string, serial: string): Promise<boolean> {
   const sqlite = await getSqliteAsync();
   const found = await sqlite.getFirstAsync(
     `SELECT 1 FROM packages k JOIN products p ON p.id = k.product_id
-      WHERE p.gtin = ? AND k.serial = ? AND k.deleted_at IS NULL AND p.deleted_at IS NULL`,
+      WHERE p.gtin = ? AND k.serial = ? AND k.deleted_at IS NULL AND p.deleted_at IS NULL AND ${inLiveCabinet("p.cabinet_id")}`,
     [gtin, serial],
   );
   return found != null;
@@ -376,11 +532,13 @@ export interface Named {
 /** The people or the places a box can be given, or the tags a product can, by name. */
 export async function readNamed(table: NamedTable): Promise<Named[]> {
   const sqlite = await getSqliteAsync();
-  const rows = await sqlite.getAllAsync<Named>(`SELECT id, name, cabinet_id AS cabinetId FROM ${table} WHERE deleted_at IS NULL`);
+  const rows = await sqlite.getAllAsync<Named>(`SELECT id, name, cabinet_id AS cabinetId FROM ${table} WHERE deleted_at IS NULL AND ${inLiveCabinet("cabinet_id")}`);
   return rows.sort((a, b) => a.name.localeCompare(b.name, "tr"));
 }
 
 export interface Person extends Named {
+  /** A pet's boxes are under a profile of its own (F2.10); "self" is not offered, the profile names the person. */
+  kind: (typeof PERSON_KINDS)[number];
   color: (typeof PERSON_COLORS)[number] | null;
   warnDays: number | null;
   photoId: string | null;
@@ -391,14 +549,14 @@ export interface Person extends Named {
 export async function readPeople(): Promise<Person[]> {
   const sqlite = await getSqliteAsync();
   const rows = await sqlite.getAllAsync<Person>(
-    `SELECT id, name, cabinet_id AS cabinetId, color, warn_days AS warnDays, photo_id AS photoId, (SELECT thumb FROM photos WHERE id = photo_id) AS thumb
-       FROM people WHERE deleted_at IS NULL`,
+    `SELECT id, name, cabinet_id AS cabinetId, kind, color, warn_days AS warnDays, photo_id AS photoId, (SELECT thumb FROM photos WHERE id = photo_id) AS thumb
+       FROM people WHERE deleted_at IS NULL AND ${inLiveCabinet("cabinet_id")}`,
   );
   return rows.sort((a, b) => a.name.localeCompare(b.name, "tr"));
 }
 
 /** A person's colour or notice ahead of an expiry; `null` goes back to the default. */
-export async function editPerson(id: string, patch: { color?: Person["color"]; warnDays?: number | null }): Promise<void> {
+export async function editPerson(id: string, patch: { kind?: Person["kind"]; color?: Person["color"]; warnDays?: number | null }): Promise<void> {
   return writeRows(async () => {
     const there = await findRow("people", id);
     return there && there.deleted_at == null ? editRow("people", there, patch) : [];
@@ -410,11 +568,79 @@ export async function editPerson(id: string, patch: { color?: Person["color"]; w
  * box that named it reads as unassigned, a product as untagged, so no row
  * that names it is rewritten.
  */
-export async function renameNamed(table: NamedTable, id: string, name: string): Promise<void> {
+export async function renameNamed(table: NamedTable | "cabinets", id: string, name: string): Promise<void> {
   return writeRows(async () => {
     const there = await findRow(table, id);
     return there && there.deleted_at == null ? editRow(table, there, { name }) : [];
   });
+}
+
+export interface Member {
+  id: string;
+  userId: string;
+  role: MemberRole;
+  name: string;
+}
+
+/** A household the person is in or made: the ones Dolabım shows beside the person's own cabinet. */
+export interface Household {
+  id: string;
+  name: string;
+  ownerId: string;
+  photoId: string | null;
+  thumb: string | null;
+  /** Who is in it, the owner first; none until it is first shared, since only the server adds a member. */
+  members: Member[];
+}
+
+/** The households on this device, by name. The personal cabinet's id is its owner's, a household's never is. */
+export async function readHouseholds(): Promise<Household[]> {
+  const sqlite = await getSqliteAsync();
+  const cabinets = await sqlite.getAllAsync<Omit<Household, "members">>(
+    "SELECT id, name, owner_id AS ownerId, photo_id AS photoId, (SELECT thumb FROM photos WHERE id = photo_id) AS thumb FROM cabinets WHERE deleted_at IS NULL AND id <> owner_id",
+  );
+  const members = await sqlite.getAllAsync<Member & { cabinetId: string }>(
+    "SELECT id, cabinet_id AS cabinetId, user_id AS userId, role, name FROM cabinet_members WHERE deleted_at IS NULL ORDER BY role <> 'owner', name, id",
+  );
+  return cabinets
+    .map((cabinet) => ({ ...cabinet, members: members.filter((member) => member.cabinetId === cabinet.id).map(({ cabinetId: _, ...member }) => member) }))
+    .sort((a, b) => a.name.localeCompare(b.name, "tr"));
+}
+
+/**
+ * Whether the person may change what is in `cabinetId`: their own cabinet, a
+ * household they made (before the server has added them as its member) or one
+ * they edit. A viewer's write would be refused by the server and set aside by
+ * sync, the box changed on this device alone, so the screens offer none.
+ */
+export function writes(households: readonly Pick<Household, "id" | "ownerId" | "members">[], me: string | null, cabinetId: string): boolean {
+  if (cabinetId === me) return true;
+  const household = households.find((each) => each.id === cabinetId);
+  return household?.ownerId === me || household?.members.find((member) => member.userId === me)?.role === "editor";
+}
+
+/**
+ * What a device may write of a membership (migration 7's guard keeps the
+ * rest): the owner removes a member or changes their role, and a member
+ * removes themselves, which is leaving. The device lets the household go once
+ * the server has heard.
+ */
+async function editMember(id: string, patch: Partial<Pick<Member, "role">> & { deletedAt?: string }): Promise<void> {
+  await writeRows(async () => {
+    const there = await findRow("cabinet_members", id);
+    return there && there.deleted_at == null ? editRow("cabinet_members", there, patch) : [];
+  });
+}
+
+export const removeMember = (id: string) => editMember(id, { deletedAt: nowIso() });
+
+export const setMemberRole = (id: string, role: Exclude<MemberRole, "owner">) => editMember(id, { role });
+
+/** A new household, made on this device as Gital's lists are (migration 5); its id is returned. */
+export async function openHousehold(ownerId: string, name: string): Promise<string> {
+  const id = uuidv7();
+  await writeRows([{ table: "cabinets", row: { id, ownerId, name } }]);
+  return id;
 }
 
 /** A person a box is for, a place one is kept, or a tag; its id is returned. */

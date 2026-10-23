@@ -15,7 +15,7 @@ vi.mock("../../src/db/client", async () => {
 
 vi.mock("expo-crypto", async () => (await import("../helpers")).expoCryptoMock);
 
-const { addNamed, addPackage, addTo, correctTo, editBoxes, editPerson, editProduct, findProduct, hasBox, importBoxes, readCabinet, readChanges, readMoves, readNamed, readPeople, remainingMilli, renameNamed, setPhoto, tagProduct, takeFrom } = await import("../../src/data/cabinet");
+const { addNamed, addPackage, addTo, correctTo, editBoxes, editPerson, editProduct, findProduct, hasBox, importBoxes, moveBox, openHousehold, readCabinet, readHouseholds, removeMember, setMemberRole, writes, readActivity, readChanges, readHouseholdEvents, readMoves, readNamed, readPeople, remainingMilli, renameNamed, setPhoto, tagProduct, takeFrom } = await import("../../src/data/cabinet");
 const { deleteRows, undoRows } = await import("../../src/db/mutations");
 const { migratedDatabase } = await import("../helpers");
 const { readPhoto } = await import("../../src/data/photos");
@@ -226,7 +226,7 @@ describe("changing a box", () => {
     ]);
     expect(outbox()).toEqual(["packages", "package_changes", "packages", "package_changes"]);
     expect(await readChanges(box), "what changed, before and after, and not what was already so").toEqual([
-      { id: expect.any(String), changes: { expiresOn: ["2027-03-31", "2028-01-31"], personId: [null, "p1"] }, createdAt: expect.any(String) },
+      { id: expect.any(String), changes: { expiresOn: ["2027-03-31", "2028-01-31"], personId: [null, "p1"] }, createdAt: expect.any(String), createdBy: null },
     ]);
     expect(all("SELECT DISTINCT cabinet_id FROM package_changes")).toEqual([{ cabinet_id: "me" }]);
     await undoRows(written!);
@@ -356,16 +356,16 @@ describe("people and places", () => {
     expect(await readNamed("locations")).toEqual([{ id: expect.any(String), name: "Mutfak", cabinetId: "me" }]);
   });
 
-  it("are told apart by a colour, and give their boxes their own notice ahead of an expiry", async () => {
+  it("are told apart by a colour and a pet by its kind, and give their boxes their own notice ahead of an expiry", async () => {
     const zeynep = await addNamed("people", "me", "Zeynep");
     await addNamed("people", "me", "Ali");
     expect(await readPeople()).toEqual([
-      { id: expect.any(String), name: "Ali", cabinetId: "me", color: null, warnDays: null, photoId: null, thumb: null },
-      { id: zeynep, name: "Zeynep", cabinetId: "me", color: null, warnDays: null, photoId: null, thumb: null },
+      { id: expect.any(String), name: "Ali", cabinetId: "me", kind: "person", color: null, warnDays: null, photoId: null, thumb: null },
+      { id: zeynep, name: "Zeynep", cabinetId: "me", kind: "person", color: null, warnDays: null, photoId: null, thumb: null },
     ]);
-    await editPerson(zeynep, { color: "teal", warnDays: 90 });
+    await editPerson(zeynep, { kind: "pet", color: "teal", warnDays: 90 });
     await setPhoto("people", zeynep, PHOTO);
-    expect((await readPeople())[1]).toEqual({ id: zeynep, name: "Zeynep", cabinetId: "me", color: "teal", warnDays: 90, photoId: expect.any(String), thumb: PHOTO.thumb });
+    expect((await readPeople())[1]).toEqual({ id: zeynep, name: "Zeynep", cabinetId: "me", kind: "pet", color: "teal", warnDays: 90, photoId: expect.any(String), thumb: PHOTO.thumb });
     const hers = await addPackage("me", PAROL, { unit: "tablet", personId: zeynep }, 1000);
     const own = await addPackage("me", PAROL, { unit: "tablet", personId: zeynep, warnDays: 7 }, 1000);
     const nobody = await addPackage("me", PAROL, { unit: "tablet" }, 1000);
@@ -389,6 +389,200 @@ describe("people and places", () => {
     await renameNamed("locations", kitchen, "x");
     await renameNamed("people", "none", "x");
     expect(outbox()).toEqual([]);
+  });
+});
+
+describe("a household's activity", () => {
+  it("is its live boxes' moves and edits, newest first, each with its box and the writer the server named", async () => {
+    const box = await addPackage("ev", PAROL, { unit: "tablet" }, 20_000);
+    await takeFrom(box, 5000);
+    await editBoxes([box], { nickname: "Annemin" });
+    const gone = await addPackage("ev", PAROL, { unit: "tablet" }, 1000);
+    await deleteRows("packages", [gone]);
+    await addPackage("me", PAROL, { unit: "tablet" }, 1000);
+    harness.db!.exec("UPDATE package_moves SET created_by = 'ayse' WHERE quantity_milli = -5000");
+    const activity = await readActivity("ev");
+    expect(activity.map((each) => [each.name, each.reason, each.quantityMilli, each.by, each.changes]), "another cabinet's and a deleted box's left out").toEqual([
+      ["Annemin", null, null, null, { nickname: [null, "Annemin"] }],
+      ["Annemin", "use", -5000, "ayse", null],
+      ["Annemin", "initial", 20_000, null, null],
+    ]);
+    expect(activity.every((each) => each.boxId === box && each.unit === "tablet")).toBe(true);
+    expect((await readMoves(box)).map((move) => move.createdBy)).toEqual(["ayse", null]);
+    expect(await readActivity("ev", 1), "only as many as asked").toHaveLength(1);
+  });
+});
+
+describe("what happened in the person's households", () => {
+  it("is who joined after them, and boxes another member added, a day's together, or took out", async () => {
+    harness.db!.exec(`INSERT INTO cabinets (id, created_at, updated_at, owner_id, name) VALUES ('ev', 'x', 'x', 'ali', 'Ev')`);
+    harness.db!.exec(`INSERT INTO cabinet_members (id, created_at, updated_at, cabinet_id, user_id, role, name) VALUES
+      ('m1', '2026-10-01T09:00:00Z', 'x', 'ev', 'ali', 'owner', 'Ali'), ('m2', '2026-10-02T09:00:00Z', 'x', 'ev', 'me', 'editor', 'Zeynep'),
+      ('m3', '2026-10-03T09:00:00Z', 'x', 'ev', 'can', 'viewer', 'Can')`);
+    const one = await addPackage("ev", PAROL, { unit: "tablet" }, 1000);
+    const two = await addPackage("ev", { name: "Majezik" }, { unit: "tablet" }, 1000);
+    const mine = await addPackage("ev", { name: "Aspirin" }, { unit: "tablet" }, 1000);
+    harness.db!.exec(`UPDATE package_moves SET created_by = 'ali', created_at = '2026-10-04T09:00:00Z' WHERE package_id IN ('${one}', '${two}')`);
+    harness.db!.exec(`UPDATE package_moves SET created_by = 'me' WHERE package_id = '${mine}'`);
+    await editBoxes([one], { disposition: "disposed" });
+    await editBoxes([two], { note: "x" });
+    harness.db!.exec("UPDATE package_changes SET created_by = 'ali'");
+    const events = await readHouseholdEvents("me");
+    expect(events.map(({ kind, byName, name, count }) => [kind, byName, name, count]), "Ali joined first, and the person's own box is not told").toEqual([
+      ["memberJoined", "Can", "Ev", 1],
+      ["boxAdded", "Ali", "Majezik", 2],
+      ["boxLeft", "Ali", "Parol", 1],
+    ]);
+    harness.db!.exec("UPDATE cabinets SET deleted_at = 'x'");
+    expect(await readHouseholdEvents("me"), "a deleted household tells nothing").toEqual([]);
+  });
+});
+
+describe("moving a box to another cabinet", () => {
+  const live = () => all("SELECT id, cabinet_id, product_id, person_id, location_id FROM packages WHERE deleted_at IS NULL");
+
+  it("tombstones it where it was and makes it afresh there, with what it holds, its history, and the people and places of the same name", async () => {
+    // Ahmet sorts first in each cabinet, so only the name taken from the box finds its match.
+    await addNamed("people", "ev", "Ahmet");
+    await addNamed("people", "me", "Ahmet");
+    const ali = await addNamed("people", "ev", "Ali");
+    const mine = await addNamed("people", "me", "ali");
+    const shelf = await addNamed("locations", "ev", "Raf");
+    const box = await addPackage("ev", PAROL, { unit: "tablet", personId: ali, locationId: shelf, expiresOn: "2027-03-31" }, 20_000);
+    await takeFrom(box, 5000);
+    await editBoxes([box], { note: "Mutfakta", checkOf: "ayse", checkAskedAt: "2026-10-23T10:00:00.000Z" });
+    harness.db!.exec("UPDATE package_moves SET created_by = 'ayse'");
+    const { id: movedId, written } = (await moveBox(box, "me"))!;
+    expect(all(`SELECT check_of, check_asked_at FROM packages WHERE id = '${movedId}'`), "an ask stays with the household it was made in").toEqual([{ check_of: null, check_asked_at: null }]);
+    expect((await readMoves(movedId)).map((move) => move.createdBy), "its copied history, the mover's once the server says so").toEqual([null, null]);
+    const [moved] = live();
+    expect(moved!.id, "its new id").toBe(movedId);
+    expect(moved).toMatchObject({ cabinet_id: "me", person_id: mine });
+    expect(all(`SELECT cabinet_id, name FROM locations WHERE id = '${String(moved!.location_id)}'`), "a place it lacked is made there").toEqual([{ cabinet_id: "me", name: "Raf" }]);
+    expect(all(`SELECT cabinet_id, gtin FROM products WHERE id = '${String(moved!.product_id)}'`), "the product found or made there").toEqual([{ cabinet_id: "me", gtin: PAROL.gtin }]);
+    expect(await remainingMilli(String(moved!.id))).toBe(15_000);
+    expect((await readMoves(String(moved!.id))).map((move) => move.reason), "its moves").toEqual((await readMoves(box)).map((move) => move.reason));
+    expect(await readChanges(String(moved!.id)), "its history").toHaveLength((await readChanges(box)).length);
+    expect(all(`SELECT expires_on, note FROM packages WHERE id = '${String(moved!.id)}'`)).toEqual([{ expires_on: "2027-03-31", note: "Mutfakta" }]);
+    expect(all(`SELECT DISTINCT cabinet_id FROM package_moves WHERE package_id = '${String(moved!.id)}'`), "in the cabinet it went to").toEqual([{ cabinet_id: "me" }]);
+
+    await undoRows(written);
+    expect(live(), "undone, the box is back where it was").toEqual([expect.objectContaining({ id: box, cabinet_id: "ev" })]);
+    const original = String(live()[0]!.product_id);
+    await moveBox(box, "me");
+    await moveBox(String(live()[0]!.id), "ev");
+    expect(live()[0], "moved back, it finds the product it left").toMatchObject({ cabinet_id: "ev", product_id: original, person_id: ali, location_id: shelf });
+  });
+
+  it("into a household, arrives now with what it holds, and none of its private history", async () => {
+    harness.db!.exec(`INSERT INTO cabinets (id, created_at, updated_at, owner_id, name) VALUES ('ev', 'x', 'x', 'me', 'Ev')`);
+    const box = await addPackage("me", PAROL, { unit: "tablet" }, 20_000);
+    await takeFrom(box, 5000);
+    await editBoxes([box], { note: "Gizli" });
+    await editBoxes([box], { note: null });
+    harness.db!.exec("UPDATE package_moves SET created_at = '2025-01-01T00:00:00.000Z'");
+    const { id } = (await moveBox(box, "ev"))!;
+    expect(await readChanges(id), "an old note stays private").toEqual([]);
+    const [arrived] = await readMoves(id);
+    expect([arrived!.reason, arrived!.quantityMilli, (await readMoves(id)).length]).toEqual(["initial", 15_000, 1]);
+    expect(arrived!.createdAt > "2026", "dated now, not at its purchase").toBe(true);
+    const empty = await addPackage("me", PAROL, { unit: "tablet" }, 0);
+    expect(await readMoves((await moveBox(empty, "ev"))!.id), "nothing held, nothing moved").toEqual([]);
+  });
+
+  it("finds a GTIN's product by its GTIN, one without by its name, and none of another strength", async () => {
+    const productOf = (box: string) => all(`SELECT p.name, p.strength, p.gtin FROM packages b JOIN products p ON p.id = b.product_id WHERE b.id = '${box}'`)[0];
+    await addPackage("me", { name: "Kas", strength: "100 ml" }, { unit: "ml" }, 0);
+    await addPackage("me", { name: "Parol", strength: "500 mg" }, { unit: "tablet" }, 0);
+    const syrup = (await moveBox(await addPackage("ev", { name: "Şurup", strength: "100 ml" }, { unit: "ml" }, 0), "me"))!.id;
+    expect(productOf(syrup), "not another name of the same strength").toEqual({ name: "Şurup", strength: "100 ml", gtin: null });
+    const parol = (await moveBox(await addPackage("ev", PAROL, { unit: "tablet" }, 0), "me"))!.id;
+    expect(productOf(parol), "not a same-named one without it").toEqual({ name: "Parol", strength: "500 mg", gtin: PAROL.gtin });
+    const cream = await addPackage("ev", { name: "Krem" }, { unit: "tup" }, 0);
+    const left = productOf(cream);
+    const away = (await moveBox(cream, "me"))!.id;
+    const back = (await moveBox(away, "ev"))!.id;
+    expect(productOf(back)).toEqual(left);
+    expect(new Set(all(`SELECT product_id FROM packages WHERE id IN ('${cream}', '${back}')`).map((row) => row.product_id)).size, "one of no strength moved back finds its own").toBe(1);
+  });
+
+  it("finds a product without a GTIN by its name and strength, and moves nothing to where it is or once it is gone", async () => {
+    const box = await addPackage("ev", { name: "Şurup", strength: "100 ml" }, { unit: "ml" }, 0);
+    const original = String(live()[0]!.product_id);
+    await addPackage("me", { name: "Şurup", strength: "200 ml" }, { unit: "ml" }, 0);
+    await moveBox(box, "me");
+    const moved = live().find((each) => each.cabinet_id === "me" && each.id !== box && all(`SELECT strength FROM products WHERE id = '${String(each.product_id)}'`)[0]!.strength === "100 ml");
+    expect(moved, "another strength is another product").toBeDefined();
+    await moveBox(String(moved!.id), "ev");
+    expect(live().find((each) => each.cabinet_id === "ev")!.product_id).toBe(original);
+    const there = String(live().find((each) => each.cabinet_id === "ev")!.id);
+    expect(await moveBox(there, "ev")).toBeNull();
+    await deleteRows("packages", [there]);
+    expect(await moveBox(there, "me")).toBeNull();
+    expect(await moveBox("none", "me")).toBeNull();
+  });
+});
+
+describe("households", () => {
+  it("are the cabinets not the person's own, by name, each with its members, the owner first", async () => {
+    harness.db!.exec(`INSERT INTO cabinets (id, created_at, updated_at, owner_id, name) VALUES ('me', 'x', 'x', 'me', 'Fiala')`);
+    const yazlik = await openHousehold("me", "Yazlık");
+    const ev = await openHousehold("me", "Ev");
+    expect(all(`SELECT owner_id, name FROM cabinets WHERE id = '${ev}'`)).toEqual([{ owner_id: "me", name: "Ev" }]);
+    expect(outbox()).toEqual(["cabinets", "cabinets"]);
+    harness.db!.exec(`INSERT INTO cabinet_members (id, created_at, updated_at, cabinet_id, user_id, role, name) VALUES
+      ('m1', 'x', 'x', '${ev}', 'b', 'editor', 'Ali'), ('m2', 'x', 'x', '${ev}', 'me', 'owner', 'Zeynep'), ('m3', 'x', 'x', '${ev}', 'c', 'viewer', 'Ayşe'),
+      ('m4', 'x', 'x', '${ev}', 'd', 'viewer', ''), ('m5', 'x', 'x', '${yazlik}', 'e', 'editor', 'Can')`);
+    harness.db!.exec(`UPDATE cabinet_members SET deleted_at = 'x' WHERE id = 'm5'`);
+    expect(await readHouseholds()).toEqual([
+      {
+        id: ev,
+        name: "Ev",
+        ownerId: "me",
+        photoId: null,
+        thumb: null,
+        members: [
+          { id: "m2", userId: "me", role: "owner", name: "Zeynep" },
+          { id: "m4", userId: "d", role: "viewer", name: "" },
+          { id: "m1", userId: "b", role: "editor", name: "Ali" },
+          { id: "m3", userId: "c", role: "viewer", name: "Ayşe" },
+        ],
+      },
+      { id: yazlik, name: "Yazlık", ownerId: "me", photoId: null, thumb: null, members: [] },
+    ]);
+    await renameNamed("cabinets", ev, "Evimiz");
+    await deleteRows("cabinets", [yazlik]);
+    expect((await readHouseholds()).map((household) => household.name), "renamed, and a deleted one is gone").toEqual(["Evimiz"]);
+    await setPhoto("cabinets", ev, PHOTO);
+    expect(await readHouseholds(), "its photo, the thumbnail read with it").toEqual([expect.objectContaining({ photoId: expect.any(String), thumb: PHOTO.thumb })]);
+  });
+
+  it("change a member's role or let them go, and leave one already gone as it is", async () => {
+    harness.db!.exec(`INSERT INTO cabinet_members (id, created_at, updated_at, cabinet_id, user_id, role, name) VALUES
+      ('m1', 'x', 'x', 'ev', 'b', 'editor', 'Ali'), ('m2', 'x', 'x', 'ev', 'c', 'editor', 'Ayşe')`);
+    await setMemberRole("m1", "viewer");
+    await removeMember("m2");
+    expect(all("SELECT id, role, deleted_at IS NOT NULL AS gone FROM cabinet_members ORDER BY id")).toEqual([
+      { id: "m1", role: "viewer", gone: 0 },
+      { id: "m2", role: "editor", gone: 1 },
+    ]);
+    expect(outbox()).toEqual(["cabinet_members", "cabinet_members"]);
+    harness.db!.exec("DELETE FROM outbox");
+    await setMemberRole("m2", "viewer");
+    await removeMember("none");
+    expect(outbox()).toEqual([]);
+  });
+
+  it("are written by their owner and editors, never by a viewer or a stranger; the person's own cabinet always", () => {
+    const member = (userId: string, role: "owner" | "editor" | "viewer") => ({ id: userId, userId, role, name: userId });
+    const households = [
+      { id: "ev", name: "Ev", ownerId: "a", members: [member("a", "owner"), member("b", "editor"), member("c", "viewer")] },
+      // Made here and not yet shared: the server has added nobody, its owner included.
+      { id: "yeni", name: "Yeni", ownerId: "a", members: [] },
+    ];
+    expect(["a", "b", "c", "d"].map((me) => writes(households, me, "ev"))).toEqual([true, true, false, false]);
+    expect([writes(households, "a", "yeni"), writes(households, "b", "yeni")]).toEqual([true, false]);
+    expect([writes(households, "c", "c"), writes([], "c", "c"), writes(households, "c", "gone"), writes(households, null, "ev")]).toEqual([true, true, false, false]);
   });
 });
 

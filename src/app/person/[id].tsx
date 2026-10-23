@@ -6,10 +6,11 @@
 
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import Pill from "lucide-react-native/icons/pill";
 import Trash from "lucide-react-native/icons/trash";
 
 import { editPerson, renameNamed, setPhoto } from "../../data/cabinet";
-import { useCabinet, usePeople } from "../../data/hooks";
+import { useCabinet, useHouseholds, usePeople } from "../../data/hooks";
 import { PERSON_COLORS } from "../../db/schema";
 import { deleteRows, undoRows } from "../../db/mutations";
 import { parseDays, SOON_DAYS, WARN_DAYS_MAX } from "../../domain/boxes";
@@ -17,19 +18,23 @@ import { tr } from "../../i18n/tr";
 import { Body, Card, ChoiceTile, IconButton, ListRow, Notice, Screen, SectionHeader, rowsOf } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
 import { radioGroupKeys } from "../../ui/keys";
-import { PersonMark } from "../../ui/named-choices";
+import { PersonMark, ViewOnly } from "../../ui/named-choices";
 import { navigateBack } from "../../ui/navigation";
+import { openCabinet } from "../../ui/cabinet-link";
 import { PhotoField } from "../../ui/photo-field";
 import { controlSize, personMark, spacing } from "../../ui/theme";
 import { showUndo } from "../../ui/undo";
 
 const COLORS = [null, ...PERSON_COLORS] as const;
+// "self" is not chosen here: the profile says which person is the one using the app.
+const KINDS = ["person", "pet"] as const;
 
 export default function PersonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const people = usePeople();
   const cabinet = useCabinet();
+  const { writes } = useHouseholds();
   const person = people.data.find((each) => each.id === id);
 
   if (!person) {
@@ -41,6 +46,7 @@ export default function PersonScreen() {
   }
   const boxes = cabinet.data.flatMap((product) => product.boxes).filter((box) => box.personId === person.id && box.disposition == null).length;
 
+  const editable = writes(person.cabinetId);
   const attempt = async (write: () => Promise<unknown>) => {
     try {
       await write();
@@ -77,45 +83,58 @@ export default function PersonScreen() {
     <Screen
       back="/names/people"
       title={person.name}
-      actions={<IconButton icon={Trash} label={tr.common.joined(tr.names.removeConfirm, person.name)} tone="danger" onPress={() => void remove()} />}
+      actions={editable ? <IconButton icon={Trash} label={tr.common.joined(tr.names.removeConfirm, person.name)} tone="danger" onPress={() => void remove()} /> : null}
     >
+      <ViewOnly cabinetId={person.cabinetId} />
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md }}>
         <PersonMark person={person} size={personMark.large} />
-        <Body muted>{tr.person.boxes(boxes)}</Body>
+        <Body muted>{tr.common.joined(person.kind === "pet" ? tr.person.kinds.pet : undefined, tr.person.boxes(boxes))}</Body>
       </View>
 
       <Card rows>
-        <ListRow title={tr.person.name} subtitle={person.name} chevron onPress={() => void rename()} />
+        <ListRow icon={Pill} title={tr.person.showBoxes} chevron onPress={() => openCabinet({ person: person.id })} />
+        <ListRow title={tr.person.name} subtitle={person.name} chevron={editable} onPress={editable ? () => void rename() : undefined} />
         <ListRow
           title={tr.box.warn}
           subtitle={person.warnDays == null ? tr.box.warnDefault(tr.box.warnBefore(SOON_DAYS)) : tr.box.warnBefore(person.warnDays)}
-          chevron
-          onPress={() => void changeWarn()}
+          chevron={editable}
+          onPress={editable ? () => void changeWarn() : undefined}
         />
       </Card>
 
-      <SectionHeader>{tr.person.colorSection}</SectionHeader>
-      <Body muted style={{ marginBottom: spacing.sm }}>{tr.person.colorHint}</Body>
-      <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.person.colorSection} style={{ gap: spacing.sm, marginBottom: spacing.sm }}>
-        {rowsOf(COLORS, 3).map((row, at) => (
-          <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
-            {row.map((color) => (
-              <ChoiceTile
-                key={color ?? "auto"}
-                label={color ? tr.person.colors[color] : tr.person.colorAuto}
-                selected={person.color === color}
-                layout="row"
-                minHeight={controlSize.minimumTarget}
-                onPress={() => void attempt(() => editPerson(person.id, { color }))}
-              >
-                <PersonMark person={{ ...person, color, thumb: null }} />
+      {editable ? (
+        <>
+          <SectionHeader>{tr.person.kindSection}</SectionHeader>
+          <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.person.kindSection} style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm }}>
+            {KINDS.map((kind) => (
+              <ChoiceTile key={kind} label={tr.person.kinds[kind]} selected={person.kind === kind} layout="row" minHeight={controlSize.minimumTarget} onPress={() => void attempt(() => editPerson(person.id, { kind }))}>
+                <PersonMark person={{ ...person, kind, thumb: null }} />
               </ChoiceTile>
             ))}
           </View>
-        ))}
-      </View>
+          <SectionHeader>{tr.person.colorSection}</SectionHeader>
+          <Body muted style={{ marginBottom: spacing.sm }}>{tr.person.colorHint}</Body>
+          <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.person.colorSection} style={{ gap: spacing.sm, marginBottom: spacing.sm }}>
+            {rowsOf(COLORS, 3).map((row, at) => (
+              <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
+                {row.map((color) => (
+                  <ChoiceTile
+                    key={color ?? "auto"}
+                    label={color ? tr.person.colors[color] : tr.person.colorAuto}
+                    selected={person.color === color}
+                    minHeight={controlSize.minimumTarget}
+                    onPress={() => void attempt(() => editPerson(person.id, { color }))}
+                  >
+                    <PersonMark person={{ ...person, color, thumb: null }} />
+                  </ChoiceTile>
+                ))}
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
 
-      <PhotoField name={person.name} photoId={person.photoId} thumb={person.thumb} onChange={(change) => void attempt(() => setPhoto("people", person.id, change))} />
+      <PhotoField name={person.name} photoId={person.photoId} thumb={person.thumb} onChange={editable ? (change) => void attempt(() => setPhoto("people", person.id, change)) : undefined} />
     </Screen>
   );
 }

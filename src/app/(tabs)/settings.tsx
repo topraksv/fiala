@@ -7,6 +7,7 @@ import CircleQuestionMark from "lucide-react-native/icons/circle-question-mark";
 import CircleUserRound from "lucide-react-native/icons/circle-user-round";
 import CloudOff from "lucide-react-native/icons/cloud-off";
 import CloudUpload from "lucide-react-native/icons/cloud-upload";
+import House from "lucide-react-native/icons/house";
 import KeyRound from "lucide-react-native/icons/key-round";
 import LogOut from "lucide-react-native/icons/log-out";
 import MessageSquare from "lucide-react-native/icons/message-square";
@@ -19,7 +20,7 @@ import ScanFace from "lucide-react-native/icons/scan-face";
 import Sun from "lucide-react-native/icons/sun";
 
 import { useSession } from "../../auth/session";
-import { usePeople, useSettings } from "../../data/hooks";
+import { useHouseholds, usePeople, useSettings } from "../../data/hooks";
 import { profileChoice } from "../../data/settings";
 import { partOfDay } from "../../domain/dates";
 import { tr } from "../../i18n/tr";
@@ -61,12 +62,15 @@ export default function SettingsScreen() {
   const stacked = !shouldPairTiles(width);
   const settings = useSettings();
   const people = usePeople();
-  const me = people.data.find((person) => person.id === profileChoice(settings.data, "me", people.data));
+  // The account is greeted as its own cabinet knows it.
+  const own = useHouseholds().me;
+  const me = people.data.find((person) => person.id === profileChoice(settings.data, "me", own, people.data));
   return (
     <Screen title={tr.tabs.settings} width="workspace">
       <Greeting me={me} />
       <Card rows>
         <ListRow icon={CircleUserRound} title={tr.profile.title} subtitle={tr.profile.row} chevron onPress={() => router.push("/profile")} />
+        <ListRow icon={House} title={tr.households.row} subtitle={tr.households.rowHint} chevron onPress={() => router.push("/households")} />
       </Card>
       <SectionHeader>{tr.settings.appSection}</SectionHeader>
       <Card>

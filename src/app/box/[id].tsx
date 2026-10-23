@@ -7,21 +7,24 @@
 
 import { Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import Check from "lucide-react-native/icons/check";
 import Minus from "lucide-react-native/icons/minus";
 import Plus from "lucide-react-native/icons/plus";
 import Trash from "lucide-react-native/icons/trash";
 import Undo2 from "lucide-react-native/icons/undo-2";
+import UserCheck from "lucide-react-native/icons/user-check";
 import ListChecks from "lucide-react-native/icons/list-checks";
 
-import { addNamed, addTo, correctTo, editBoxes, setPhoto, takeFrom, type BoxChange, type CabinetBox, type CabinetProduct, type Named } from "../../data/cabinet";
-import { useCabinet, useChanges, useLocations, useMoves, usePeople } from "../../data/hooks";
+import { addNamed, addTo, correctTo, editBoxes, moveBox, setPhoto, takeFrom, type CabinetBox, type CabinetProduct, type Member, type Named } from "../../data/cabinet";
+import { useCabinet, useChanges, useHouseholds, useLocations, useMoves, usePeople } from "../../data/hooks";
 import { deleteRows, undoRows } from "../../db/mutations";
 import { formatAmount, formatDay, lastOpenDay, parseAmount, parseDay, parseDays, SOON_DAYS, WARN_DAYS_MAX } from "../../domain/boxes";
 import type { PACKAGE_DISPOSITIONS } from "../../db/schema";
+import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
 import { Body, Button, Card, IconButton, ListRow, Notice, Screen, SectionHeader } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
-import { NamedChoices } from "../../ui/named-choices";
+import { CabinetChoice, changeLines, NamedChoices, useWriter, ViewOnly } from "../../ui/named-choices";
 import { navigateBack } from "../../ui/navigation";
 import { PhotoField } from "../../ui/photo-field";
 import { spacing, type, useTheme } from "../../ui/theme";
@@ -54,58 +57,18 @@ function said(product: CabinetProduct, box: CabinetBox, unit: string) {
   };
 }
 
-/** What each edited field is called in the history. */
-const CHANGED: Partial<Record<string, string>> = {
-  nickname: tr.box.nickname,
-  expiresOn: tr.addBox.expiry,
-  openedOn: tr.addBox.opened,
-  useWithinDays: tr.box.useWithin,
-  lowMilli: tr.box.low,
-  warnDays: tr.box.warn,
-  acquiredOn: tr.box.acquiredOn,
-  acquiredFrom: tr.box.acquiredFrom,
-  note: tr.box.note,
-  personId: tr.addBox.whoseSection,
-  locationId: tr.addBox.whereSection,
-  disposition: tr.box.disposition,
-};
-const DAYS = new Set(["expiresOn", "openedOn", "acquiredOn"]);
-
-/** One line of an edit: the field, what it was and what it became, each as the page shows it. */
-function changeLine(field: string, [before, after]: [unknown, unknown], unit: string, people: readonly Named[], places: readonly Named[]): string | null {
-  if (field === "photoId") return `${tr.photos.title}: ${tr.box.photoChange[before == null ? "added" : after == null ? "removed" : "replaced"]}`;
-  const label = CHANGED[field];
-  if (!label) return null;
-  const shown = (value: unknown): string => {
-    if (value == null) return field === "disposition" ? tr.box.atHome : tr.box.unknown;
-    if (DAYS.has(field)) return formatDay(String(value));
-    if (field === "personId" || field === "locationId") return (field === "personId" ? people : places).find((each) => each.id === value)?.name ?? tr.cabinet.unassigned;
-    if (field === "disposition") return tr.cabinet.dispositions[value as (typeof PACKAGE_DISPOSITIONS)[number]];
-    if (field === "lowMilli") return tr.box.lowAt(formatAmount(Number(value)), unit);
-    if (field === "useWithinDays" || field === "warnDays") return tr.box.days(Number(value));
-    return String(value);
-  };
-  return `${label}: ${shown(before)} → ${shown(after)}`;
-}
-
-function changeLines(change: BoxChange, unit: string, people: readonly Named[], places: readonly Named[]): string {
-  return Object.entries(change.changes)
-    .map(([field, pair]) => changeLine(field, pair, unit, people, places))
-    .filter((line) => line != null)
-    .join("\n");
-}
-
 export default function BoxScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { palette } = useTheme();
   const cabinet = useCabinet();
   const moves = useMoves(id);
   const changes = useChanges(id);
   const people = usePeople();
   const locations = useLocations();
+  const { writes } = useHouseholds();
   const product = cabinet.data.find((each) => each.boxes.some((box) => box.id === id));
   const box = product?.boxes.find((each) => each.id === id);
+  const writer = useWriter(box?.cabinetId);
 
   if (!product || !box) {
     return (
@@ -115,6 +78,10 @@ export default function BoxScreen() {
     );
   }
   const unit = tr.units[box.unit];
+  const editable = writes(box.cabinetId);
+  // What only someone who may change the box is given.
+  const changing = <T,>(control: T) => (editable ? control : undefined);
+  const name = box.nickname ?? product.name;
 
   // Every write here is one tap; a failure says so rather than leaving the screen as if it took.
   const attempt = async (write: () => Promise<unknown>) => {
@@ -199,10 +166,11 @@ export default function BoxScreen() {
     ...moves.data.map((each) => ({
       id: each.id,
       at: each.createdAt,
-      title: `${tr.box.reasons[each.reason]} ${each.quantityMilli > 0 ? "+" : "−"}${formatAmount(Math.abs(each.quantityMilli))} ${unit}`,
+      title: tr.box.move(each.reason, each.quantityMilli, unit),
+      by: each.createdBy,
       lines: undefined as string | undefined,
     })),
-    ...changes.data.map((each) => ({ id: each.id, at: each.createdAt, title: tr.box.changed, lines: changeLines(each, unit, people.data, locations.data) || undefined })),
+    ...changes.data.map((each) => ({ id: each.id, at: each.createdAt, title: tr.box.changed, by: each.createdBy, lines: changeLines(each.changes, unit, people.data, locations.data, writer) || undefined })),
   ].sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id));
   const details: [string, string, (() => void) | undefined][] = [
     [tr.box.nickname, shown.nickname, () => void changeText("nickname", tr.box.nickname, 80, tr.box.nicknameExamples)],
@@ -232,56 +200,46 @@ export default function BoxScreen() {
     [tr.addBox.lot, shown.lot, undefined],
     [tr.box.note, shown.note, () => void changeText("note", tr.box.note, 2000, tr.box.noteExamples)],
   ];
+  // Read, the choices below are two lines here.
+  const nameIn = (named: readonly Named[], id: string | null) => named.find((each) => each.id === id)?.name ?? tr.cabinet.unassigned;
+  if (!editable) details.push([tr.addBox.whoseSection, nameIn(people.data, box.personId), undefined], [tr.addBox.whereSection, nameIn(locations.data, box.locationId), undefined]);
 
   return (
     <Screen
       back="/cabinet"
-      title={box.nickname ?? product.name}
-      actions={<IconButton icon={Trash} label={tr.box.delete} tone="danger" onPress={() => void remove()} />}
+      title={name}
+      actions={changing(<IconButton icon={Trash} label={tr.box.delete} tone="danger" onPress={() => void remove()} />)}
     >
+      <ViewOnly cabinetId={box.cabinetId} />
       {shown.subtitle ? <Body muted style={{ marginBottom: spacing.md }}>{shown.subtitle}</Body> : null}
-      {box.disposition ? (
-        <Card>
-          <Body>{tr.box.left(tr.cabinet.dispositions[box.disposition])}</Body>
-          <View style={{ alignItems: "flex-start", marginTop: spacing.sm }}>
-            <Button label={tr.box.bringBack} icon={Undo2} variant="secondary" onPress={() => void leave(null)} />
-          </View>
-        </Card>
-      ) : null}
+      {box.disposition ? <Left disposition={box.disposition} onBringBack={changing(() => void leave(null))} /> : null}
+      <Remaining box={box} unit={unit} onMove={changing((kind: "use" | "add" | "count") => void move(kind))} />
 
-      <Card>
-        <Text style={[type.label, { color: palette.textMuted }]}>{tr.box.remaining}</Text>
-        <Text style={[type.amount, { color: palette.text }]}>{box.counted ? `${formatAmount(box.remainingMilli)} ${unit}` : tr.cabinet.uncounted}</Text>
-        <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md }}>
-          <View style={{ flex: 1 }}>
-            <Button label={tr.box.use} icon={Minus} onPress={() => void move("use")} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Button label={tr.box.add} icon={Plus} variant="secondary" onPress={() => void move("add")} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Button label={tr.box.count} icon={ListChecks} variant="secondary" onPress={() => void move("count")} />
-          </View>
-        </View>
-      </Card>
+      <CheckAsked box={box} editable={editable} />
 
-      <PhotoField name={box.nickname ?? product.name} photoId={box.photoId} thumb={box.thumb} onChange={(photo) => void attempt(() => setPhoto("packages", box.id, photo))} />
+      <PhotoField name={name} photoId={box.photoId} thumb={box.thumb} onChange={changing((photo: NewPhoto | null) => void attempt(() => setPhoto("packages", box.id, photo)))} />
 
       <SectionHeader>{tr.box.detailsSection}</SectionHeader>
       <Card rows>
         {details.map(([label, value, onPress]) => (
-          <ListRow key={label} title={label} subtitle={value} chevron={onPress != null} onPress={onPress} />
+          <ListRow key={label} title={label} subtitle={value} chevron={editable && onPress != null} onPress={editable ? onPress : undefined} />
         ))}
       </Card>
 
-      <NamedChoices table="people" named={people.data.filter((person) => person.cabinetId === box.cabinetId)} chosen={box.personId} onChoose={(personId) => void attempt(() => editBoxes([box.id], { personId }))} onAdd={(name) => addChoice("people", name)} />
-      <NamedChoices
-        table="locations"
-        named={locations.data.filter((place) => place.cabinetId === box.cabinetId)}
-        chosen={box.locationId}
-        onChoose={(locationId) => void attempt(() => editBoxes([box.id], { locationId }))}
-        onAdd={(name) => addChoice("locations", name)}
-      />
+      {editable ? (
+        <>
+          <Placement box={box} />
+          <AskCheck box={box} />
+          <NamedChoices table="people" named={people.data.filter((person) => person.cabinetId === box.cabinetId)} chosen={box.personId} onChoose={(personId) => void attempt(() => editBoxes([box.id], { personId }))} onAdd={(name) => addChoice("people", name)} />
+          <NamedChoices
+            table="locations"
+            named={locations.data.filter((place) => place.cabinetId === box.cabinetId)}
+            chosen={box.locationId}
+            onChoose={(locationId) => void attempt(() => editBoxes([box.id], { locationId }))}
+            onAdd={(name) => addChoice("locations", name)}
+          />
+        </>
+      ) : null}
 
       <SectionHeader>{tr.box.historySection}</SectionHeader>
       {history.length === 0 ? (
@@ -289,23 +247,131 @@ export default function BoxScreen() {
       ) : (
         <Card rows>
           {history.map((each) => (
-            <ListRow key={each.id} title={each.title} subtitle={tr.common.joined(each.lines, tr.box.when(each.at))} />
+            <ListRow key={each.id} title={each.title} subtitle={tr.common.joined(each.lines, writer(each.by), tr.box.when(each.at))} />
           ))}
         </Card>
       )}
 
-      {box.disposition ? null : (
-        <>
-          <SectionHeader>{tr.box.leaveSection}</SectionHeader>
-          <Body muted style={{ marginBottom: spacing.sm }}>{tr.box.leaveHint}</Body>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
-            {(["archived", "lost", "disposed"] as const).map((each) => (
-              <Button key={each} label={tr.box.leave[each]} variant="secondary" size="sm" onPress={() => void leave(each)} />
-            ))}
-          </View>
-        </>
-      )}
+      {box.disposition || !editable ? null : <Leave onLeave={(each) => void leave(each)} />}
     </Screen>
   );
 }
 
+/** A box no longer at home, and for whoever may change it the way back. */
+/**
+ * Whether the household sees the box (`docs/TASKS.md` F2.5): the household
+ * it is in, or the open one for a box of the person's own. Moved, the box is
+ * a new row, so the page follows it to its new id, and back on an undo.
+ */
+function Placement({ box }: { box: CabinetBox }) {
+  const router = useRouter();
+  const { me, open, households, writes } = useHouseholds();
+  const household = households.data.find((each) => each.id === box.cabinetId) ?? (open && writes(open.id) ? open : null);
+  const own = box.cabinetId === me;
+  const go = (id: string) => router.replace({ pathname: "/box/[id]", params: { id } });
+  const choose = async (toOwn: boolean) => {
+    if (toOwn === own || !me || !household) return;
+    try {
+      const moved = await moveBox(box.id, toOwn ? me : household.id);
+      if (!moved) return;
+      go(moved.id);
+      showUndo(toOwn ? tr.box.movedPrivate : tr.box.movedTo(household.name), async () => {
+        await undoRows(moved.written);
+        go(box.id);
+      });
+    } catch {
+      await appError(tr.errors.saveFailed);
+    }
+  };
+  return <CabinetChoice household={household} own={own} title={tr.box.seenBySection} onChoose={(toOwn) => void choose(toOwn)} />;
+}
+
+/** An open ask to check the box (`docs/TASKS.md` F2.9), and for whoever may change it the word that it is done. */
+function CheckAsked({ box, editable }: { box: CabinetBox; editable: boolean }) {
+  const { me } = useHouseholds();
+  const writer = useWriter(box.cabinetId);
+  if (!box.checkOf) return null;
+  const done = () => editBoxes([box.id], { checkOf: null, checkAskedAt: null }).then(() => showNotice(tr.box.checkDone), () => appError(tr.errors.saveFailed));
+  return (
+    <Card>
+      <Body>{box.checkOf === me ? tr.box.checkAskedOfYou : tr.box.checkAsked(writer(box.checkOf) ?? tr.sharing.unnamed)}</Body>
+      {box.checkAskedAt ? <Body muted>{tr.box.when(box.checkAskedAt)}</Body> : null}
+      {editable ? (
+        <View style={{ alignItems: "flex-start", marginTop: spacing.sm }}>
+          <Button label={tr.box.checked} icon={Check} variant="secondary" onPress={() => void done()} />
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+/** Whom of the household's other writers to ask to check the box; absent while an ask is open or with none to ask. */
+function AskCheck({ box }: { box: CabinetBox }) {
+  const { me, households } = useHouseholds();
+  const others = households.data.find((each) => each.id === box.cabinetId)?.members.filter((member) => member.userId !== me && member.role !== "viewer") ?? [];
+  if (box.checkOf || others.length === 0) return null;
+  const ask = (member: Member) =>
+    editBoxes([box.id], { checkOf: member.userId, checkAskedAt: new Date().toISOString() }).then(() => showNotice(tr.box.checkSent(member.name || tr.sharing.unnamed)), () => appError(tr.errors.saveFailed));
+  return (
+    <>
+      <SectionHeader>{tr.box.askSection}</SectionHeader>
+      <Body muted style={{ marginBottom: spacing.sm }}>{tr.box.askHint}</Body>
+      <Card rows>
+        {others.map((member) => (
+          <ListRow key={member.id} icon={UserCheck} title={member.name || tr.sharing.unnamed} chevron onPress={() => void ask(member)} />
+        ))}
+      </Card>
+    </>
+  );
+}
+
+function Left({ disposition, onBringBack }: { disposition: (typeof PACKAGE_DISPOSITIONS)[number]; onBringBack?: () => void }) {
+  return (
+    <Card>
+      <Body>{tr.box.left(tr.cabinet.dispositions[disposition])}</Body>
+      {onBringBack ? (
+        <View style={{ alignItems: "flex-start", marginTop: spacing.sm }}>
+          <Button label={tr.box.bringBack} icon={Undo2} variant="secondary" onPress={onBringBack} />
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+/** What is left, and for whoever may change it a use, an addition or a count. */
+function Remaining({ box, unit, onMove }: { box: CabinetBox; unit: string; onMove?: (kind: "use" | "add" | "count") => void }) {
+  const { palette } = useTheme();
+  return (
+    <Card>
+      <Text style={[type.label, { color: palette.textMuted }]}>{tr.box.remaining}</Text>
+      <Text style={[type.amount, { color: palette.text }]}>{box.counted ? `${formatAmount(box.remainingMilli)} ${unit}` : tr.cabinet.uncounted}</Text>
+      {onMove ? (
+        <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md }}>
+          <View style={{ flex: 1 }}>
+            <Button label={tr.box.use} icon={Minus} onPress={() => onMove("use")} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button label={tr.box.add} icon={Plus} variant="secondary" onPress={() => onMove("add")} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button label={tr.box.count} icon={ListChecks} variant="secondary" onPress={() => onMove("count")} />
+          </View>
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+function Leave({ onLeave }: { onLeave: (disposition: (typeof PACKAGE_DISPOSITIONS)[number]) => void }) {
+  return (
+    <>
+      <SectionHeader>{tr.box.leaveSection}</SectionHeader>
+      <Body muted style={{ marginBottom: spacing.sm }}>{tr.box.leaveHint}</Body>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
+        {(["archived", "lost", "disposed"] as const).map((each) => (
+          <Button key={each} label={tr.box.leave[each]} variant="secondary" size="sm" onPress={() => onLeave(each)} />
+        ))}
+      </View>
+    </>
+  );
+}

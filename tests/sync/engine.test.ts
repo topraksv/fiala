@@ -48,7 +48,7 @@ const { tr } = await import("../../src/i18n/tr");
 const { migratedDatabase } = await import("../helpers");
 const { migrateDb } = await import("../../src/db/migrate");
 const { deterministicId, naturalKeys } = await import("../../src/db/ids");
-const { addPackage, readCabinet, remainingMilli, setPhoto, takeFrom } = await import("../../src/data/cabinet");
+const { addPackage, openHousehold, readCabinet, remainingMilli, setPhoto, takeFrom } = await import("../../src/data/cabinet");
 const { readPhoto } = await import("../../src/data/photos");
 const { purgeOwnPhotos } = await import("../../src/sync/photos");
 const { acceptInvite, answerOffer, cancelInvites, createInvite, offerCabinet, peekInvite, useOffers } = await import("../../src/sync/sharing");
@@ -753,18 +753,23 @@ describe("photos", () => {
     });
   });
 
-  it("sends a product's and a person's photo before their rows", async () => {
+  it("sends a product's, a person's and a household's photo before their rows", async () => {
     const ids = await on("A", async () => {
       await addPackage(USER, { name: "Parol" }, { unit: "tablet" }, 1000);
       const product = String((devices.A.prepare("SELECT id FROM products").get() as { id: string }).id);
       await setPhoto("products", product, { data: JPEG, thumb: JPEG });
       await writeRows([{ table: "people", row: { id: "019f6bba-2c65-7ea8-a6c9-000000000001", cabinetId: USER, name: "Zeynep" } }]);
       await setPhoto("people", "019f6bba-2c65-7ea8-a6c9-000000000001", { data: JPEG, thumb: JPEG });
+      await setPhoto("cabinets", await openHousehold(USER, "Ev"), { data: JPEG, thumb: JPEG });
       await sync();
-      return devices.A.prepare("SELECT photo_id FROM products UNION ALL SELECT photo_id FROM people").all().map((row) => String((row as { photo_id: string }).photo_id));
+      return devices.A.prepare("SELECT photo_id FROM products UNION ALL SELECT photo_id FROM people UNION ALL SELECT photo_id FROM cabinets WHERE photo_id IS NOT NULL")
+        .all()
+        .map((row) => String((row as { photo_id: string }).photo_id));
     });
-    for (const [table, photoId] of [["products", ids[0]], ["people", ids[1]]] as const) {
-      expect(cloud.requests.indexOf(`upload ${photoId}/full.jpg`), table).toBeLessThan(cloud.requests.indexOf(`upsert ${table}`));
+    for (const [table, photoId] of [["products", ids[0]], ["people", ids[1]], ["cabinets", ids[2]]] as const) {
+      const sent = cloud.requests.indexOf(`upload ${photoId}/full.jpg`);
+      expect(sent, `${table}: sent at all`).toBeGreaterThanOrEqual(0);
+      expect(sent, table).toBeLessThan(cloud.requests.indexOf(`upsert ${table}`));
     }
   });
 
@@ -1189,6 +1194,28 @@ describe("a shared cabinet", () => {
       expect(await remainingMilli(box)).toBe(0);
     });
     expect(count(devices.A, `SELECT COUNT(*) AS n FROM cabinet_members`)).toBe(0);
+  });
+
+  it("hides a household its owner deleted from every read at once, and forgets it with its rows a week on", async () => {
+    const { mine } = await joined();
+    await on("A", sync);
+    await on("C", async () => {
+      await sync();
+      await deleteRows("cabinets", [HOUSE]);
+      await sync();
+    });
+    await on("A", async () => {
+      await sync();
+      expect((await readCabinet()).map((product) => product.boxes[0]!.id), "only A's own").toEqual([mine]);
+    });
+    expect(count(devices.A, `SELECT COUNT(*) AS n FROM packages WHERE cabinet_id = '${HOUSE}'`), "kept within the week").toBe(1);
+    devices.A.prepare("UPDATE cabinets SET deleted_at = ? WHERE id = ?").run(new Date(Date.now() - 8 * 86_400_000).toISOString(), HOUSE);
+    await on("A", sync);
+    for (const table of ["cabinets", "cabinet_members", "packages", "products"]) {
+      const column = table === "cabinets" ? "id" : "cabinet_id";
+      expect(count(devices.A, `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = '${HOUSE}'`), table).toBe(0);
+    }
+    expect(await on("A", () => remainingMilli(mine)), "A's own cabinet stays").toBe(20_000);
   });
 });
 

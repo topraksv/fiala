@@ -1,5 +1,6 @@
 /** Every string a user reads. Turkish in the interface, English in code. */
 
+import { formatAmount } from "../domain/boxes";
 import type { ReminderKind } from "../domain/reminders";
 
 /** The formatter made once: "24 Eylül 2026 14:05", on the device's clock. */
@@ -189,6 +190,21 @@ export const tr = {
     dispositions: { lost: "Kayıp", disposed: "Elden çıkarıldı", archived: "Arşivde" },
     openUntil: (day: string) => `Açıkken son gün ${day}`,
   },
+  households: {
+    title: "Hangi Hane?",
+    hint: "Dolabım, kendi kutularını seçtiğin hanenin kutularıyla birlikte gösterir. Kendi kutuların her hanede seninle gelir.",
+    none: "Hane yok",
+    noneHint: "Ailenle paylaşmak için bir hane aç",
+    /** Its members by name, or that the person is alone in it: its own row is all there is until someone joins. */
+    people: (members: readonly { name: string }[]) => (members.length > 1 ? members.map((member) => member.name || tr.sharing.unnamed).join(", ") : "Yalnız sen"),
+    open: "Yeni Hane Aç",
+    openBody: "Haneye çağırdığın kişiler onun kutularını görür. Kendi kutuların sende kalır.",
+    openConfirm: "Aç",
+    examples: ["Ev", "Annemlerin evi", "Yazlık"],
+    private: "Özel",
+    row: "Hane",
+    rowHint: "Haneni seç, kişileri ve davetleri yönet",
+  },
   importFile: {
     title: "Dosyadan İçe Aktar",
     hint: "İlk satırı başlık olan bir CSV ya da JSON dosyası seç; her satır bir kutu. Okunan sütunlar: Ad (zorunlu), Marka, Etken madde, Güç, Form, Ambalaj, Üretici, Barkod ya da karekod, Birim, SKT, Açılma, Miktar, Kişi, Yer, Seri, Parti, Takma ad, Not. Excel'de \"CSV UTF-8\" olarak kaydet.",
@@ -252,7 +268,7 @@ export const tr = {
   names: {
     title: { people: "Kişiler", locations: "Yerler", tags: "Etiketler" },
     hint: {
-      people: "Kutuların kime ait olduğunu bunlardan seçersin. Hesabı olması gerekmez: çocuğun, bakımını üstlendiğin biri olabilir.",
+      people: "Kutuların kime ait olduğunu bunlardan seçersin. Hesabı olması gerekmez: çocuğun, bakımını üstlendiğin biri ya da evcil hayvanın olabilir.",
       locations: "Kutuların durduğu yerler: bir dolap, bir raf, bir çanta.",
       tags: "İlaçları bunlarla gruplarsın: ağrı kesici, alerji, çocuk için. Bir ilaca birden çok etiket verebilirsin.",
     },
@@ -297,6 +313,8 @@ export const tr = {
     historySection: "Geçmiş",
     noHistory: "Bu kutuya henüz miktar girilmedi. Say ile kutudakini yazabilirsin.",
     reasons: { initial: "İlk miktar", use: "Kullanıldı", add: "Eklendi", correction: "Sayıldı" },
+    move: (reason: "initial" | "use" | "add" | "correction", milli: number, unit: string) =>
+      `${tr.box.reasons[reason]} ${milli > 0 ? "+" : "−"}${formatAmount(Math.abs(milli))} ${unit}`,
     when: (iso: string) => dateTimeLabel(iso),
     unknown: "Girilmedi",
     change: "Değiştir",
@@ -305,6 +323,9 @@ export const tr = {
     deleteTitle: "Kutu silinsin mi?",
     deleteBody: "Kutu ve geçmişi dolabından kalkar. Hemen ardından geri alabilirsin.",
     deleted: (name: string) => `${name} kutusu silindi`,
+    seenBySection: "Kimler görür?",
+    movedPrivate: "Kutu özel yapıldı",
+    movedTo: (household: string) => `Kutu ${household} hanesine taşındı`,
     nickname: "Takma ad",
     nicknameExamples: ["Benim burun spreyim", "Çocuğun şurubu"],
     note: "Not",
@@ -333,6 +354,13 @@ export const tr = {
     warnDefault: (text: string) => `${text}, varsayılan`,
     warnInvalid: "1 ile 365 arasında bir gün sayısı yaz.",
     changed: "Değiştirildi",
+    askSection: "Kim Kontrol Etsin?",
+    askHint: "Seçtiğin kişi bildirimlerinde görür; kontrol edince buradan haber verir.",
+    checkSent: (name: string) => `Kontrol isteği gitti: ${name}`,
+    checkAsked: (name: string) => `Kontrol isteği: ${name}`,
+    checkAskedOfYou: "Bu kutuyu kontrol etmen istendi: tarihine ve miktarına bak.",
+    checked: "Kontrol Ettim",
+    checkDone: "Kontrol edildi",
     disposition: "Durum",
     atHome: "Dolapta",
     photoChange: { added: "eklendi", removed: "kaldırıldı", replaced: "değiştirildi" },
@@ -346,6 +374,9 @@ export const tr = {
     colors: { red: "Kırmızı", orange: "Turuncu", yellow: "Sarı", green: "Yeşil", teal: "Turkuaz", blue: "Mavi", purple: "Mor", pink: "Pembe" },
     warnHint: "Bu kişinin kutuları SKT'ye bu kadar gün kala yaklaşan sayılır; kutunun kendi ayarı önce gelir. Boş bırakırsan 30 gün geçerli olur.",
     boxes: (count: number) => `${count}\u00a0kutu`,
+    kindSection: "Kim?",
+    kinds: { self: "Ben", person: "Kişi", pet: "Evcil hayvan" },
+    showBoxes: "Kutularını Dolabım'da gör",
   },
   photos: {
     title: "Fotoğraf",
@@ -376,6 +407,7 @@ export const tr = {
     unreadable: "Bu kod bir ilaç kutusunun kodu olarak okunamadı. Yeniden okut ya da bilgileri elle yaz.",
     matched: (name: string) => `Dolabındaki ${name} ile eşleşti; ürün bilgileri dolduruldu.`,
     unmatched: "Bu barkod dolabında yok. İlacın adını kutudan yaz.",
+    targetSection: "Kutu nereye gitsin?",
     medicineSection: "İlaç",
     boxSection: "Kutu",
     whoseSection: "Kime ait",
@@ -416,7 +448,7 @@ export const tr = {
     duplicateConfirm: "Yine de Ekle",
     consentTitle: "Sağlık verisi için açık rıza",
     consentBody:
-      "Fiala'ya ekleyeceğin ilaçlar, kutuları, kullanımları ve kime ait oldukları sağlık verisidir; KVKK m. 6'ya göre özel nitelikli kişisel veridir. Bu veriler cihazında ve hesabınla Supabase'in Frankfurt'taki sunucusunda tutulur, yalnız sen okursun. Açık rızanı Ayarlar → Verileri Sıfırla → Dolap ile, dolaptaki verilerle birlikte geri alabilirsin. Ayrıntısı Aydınlatma Metni'nde.",
+      "Fiala'ya ekleyeceğin ilaçlar, kutuları, kullanımları ve kime ait oldukları sağlık verisidir; KVKK m. 6'ya göre özel nitelikli kişisel veridir. Bu veriler cihazında ve hesabınla Supabase'in Frankfurt'taki sunucusunda tutulur. Kendi dolabındakileri yalnız sen okursun; bir haneye eklediklerini o hanenin üyeleri de görür. Açık rızanı Ayarlar → Verileri Sıfırla → Dolap ile, dolaptaki verilerle birlikte geri alabilirsin. Ayrıntısı Aydınlatma Metni'nde.",
     consentConfirm: "Açık Rıza Veriyorum",
     consentRequired: "Açık rıza vermeden ilaç kaydedilmez.",
   },
@@ -499,6 +531,7 @@ export const tr = {
       stock: "Azalan ve biten kutu",
       undated: "Tarihi eksik kutu",
       check: "Aylık dolap kontrolü",
+      household: "Hanedeki değişiklikler",
     },
     hour: "Bildirim saati",
     at: (hour: number) => `${String(hour).padStart(2, "0")}.00`,
@@ -511,29 +544,30 @@ export const tr = {
       empty: "Kutu bitti",
       undated: "Son kullanma tarihi eksik",
       check: "Dolap kontrolü",
+      asked: "Kontrol isteği",
+      memberJoined: "Haneye biri katıldı",
+      boxAdded: "Haneye kutu eklendi",
+      boxLeft: "Kutu dolaptan çıktı",
     },
     /** With no name, the same words for every box: the notification opens the cabinet. */
-    body: (kind: ReminderKind, name: string | null) => {
+    body: (kind: ReminderKind, name: string | null, by = "Bir üye", count = 1) => {
       const box = name ? `${name} kutusu` : "Bir kutu";
       const boxOf = name ? `${name} kutusunun` : "Bir kutunun";
-      switch (kind) {
-        case "expirySoon":
-          return `${boxOf} son kullanma tarihi yaklaşıyor.`;
-        case "expired":
-          return `${boxOf} son kullanma tarihi doldu; elden çıkarmayı düşün.`;
-        case "openSoon":
-          return `${boxOf} açıldıktan sonraki kullanım süresi bitiyor.`;
-        case "openEnded":
-          return `${boxOf} açıldıktan sonraki kullanım süresi doldu.`;
-        case "low":
-          return `${box} azaldı; alınacaklara ekleyebilirsin.`;
-        case "empty":
-          return `${box} bitti; alınacaklara ekleyebilirsin.`;
-        case "undated":
-          return `${boxOf} son kullanma tarihini ekle, zamanı gelince haber verelim.`;
-        case "check":
-          return "Ayın ilk günü: dolabındaki kutulara bir göz at.";
-      }
+      const said: Record<ReminderKind, string> = {
+        expirySoon: `${boxOf} son kullanma tarihi yaklaşıyor.`,
+        expired: `${boxOf} son kullanma tarihi doldu; elden çıkarmayı düşün.`,
+        openSoon: `${boxOf} açıldıktan sonraki kullanım süresi bitiyor.`,
+        openEnded: `${boxOf} açıldıktan sonraki kullanım süresi doldu.`,
+        low: `${box} azaldı; alınacaklara ekleyebilirsin.`,
+        empty: `${box} bitti; alınacaklara ekleyebilirsin.`,
+        undated: `${boxOf} son kullanma tarihini ekle, zamanı gelince haber verelim.`,
+        check: "Ayın ilk günü: dolabındaki kutulara bir göz at.",
+        asked: `${name ? `${name} kutusunu` : "Bir kutuyu"} kontrol etmen istendi.`,
+        memberJoined: `${by}, ${name} hanesine katıldı.`,
+        boxAdded: count > 1 ? `${by} ${count}\u00a0kutu ekledi.` : `${by}, ${name} kutusunu ekledi.`,
+        boxLeft: `${by}, ${name} kutusunu dolaptan çıkardı.`,
+      };
+      return said[kind];
     },
   },
   auth: {
@@ -597,7 +631,7 @@ export const tr = {
     title: "Aydınlatma Metni",
     open: "Aydınlatma Metni",
     subtitle: "Kişisel verilerinizin nasıl işlendiğine ilişkin bilgilendirme",
-    updated: "Son güncelleme: 22 Ekim 2026",
+    updated: "Son güncelleme: 23 Ekim 2026",
     controllerName: "Ömer Toprak Şavlı",
     contactEmail: "topraksavli@hotmail.com",
     intro: "Bu metin, 6698 sayılı Kişisel Verilerin Korunması Kanunu'nun 10. maddesi uyarınca hazırlanmıştır. Fiala'yı kullandığınızda hangi kişisel verilerinizin, hangi amaçla ve hangi hukuki sebeple işlendiğini, kimlere aktarıldığını, ne kadar saklandığını ve Kanunun size tanıdığı hakları açıklar.",
@@ -621,7 +655,7 @@ export const tr = {
     purposeTitle: "4. İşleme amaçları ve hukuki sebepler",
     purposes: [
       "**Hizmetin sunulması, cihazlarınız arasında eşitlenmesi** — kimlik, iletişim ve ayar verisi. Hukuki sebep: KVKK m. 5/2-c, bir sözleşmenin kurulması veya ifasıyla doğrudan ilgili olması.",
-      "**İlaç dolabınızın tutulması ve cihazlarınız arasında eşitlenmesi** — sağlık verisi. Hukuki sebep: KVKK m. 6, açık rızanız. Rıza vermedikçe hiçbir ilaç kaydedilmez.",
+      "**İlaç dolabınızın tutulması, cihazlarınız arasında ve katıldığınız hanelerin üyeleriyle eşitlenmesi** — sağlık verisi. Hukuki sebep: KVKK m. 6, açık rızanız. Rıza vermedikçe hiçbir ilaç kaydedilmez.",
       "**Talebinizin karşılanması ve size dönülmesi** — talep ve şikâyet verisi. Hukuki sebep: KVKK m. 5/1, açık rızanız. Formu göndermedikçe bu veri oluşmaz.",
     ],
 
@@ -629,6 +663,7 @@ export const tr = {
     transferIntro: "Fiala bir hesapla kullanılır; kayıt olmadan kullanılabilen bir sürümü yoktur. Her satır alıcıyı, aktarılan veriyi ve aktarımın ne zaman yapıldığını söyler:",
     transfers: [
       "**Supabase** — barındırma Amazon Web Services, **Frankfurt / Almanya**. Hesap açtığınızda ve her eşitlemede. Aktarılan veri: kimlik, iletişim, ayar ve sağlık verisi. Hesap doğrulama ve şifre yenileme e-postalarını Supabase tetikler; e-postaların kendisi Gmail üzerinden gönderilir. Verilerinizin asıl bulunduğu yer burasıdır.",
+      "**Hane üyeleri** — davet ettiğiniz ya da sizi davet eden Fiala kullanıcıları. Bir haneye eklediğiniz ilaçlar ve kutuları, hanede görünen adınız ve rolünüz, o hanenin üyelerinin cihazlarına eşitlenir. Bir daveti siz oluşturmadıkça ya da kabul etmedikçe kimseyle paylaşılmaz; kendi dolabınızdakiler hiçbir haneye gitmez.",
       "**Google (Gmail)** — Amerika Birleşik Devletleri. Fiala'nın e-postalarını gönderen servistir. Şifre yenileme, e-posta doğrulama ve e-posta değişikliği iletilerinde aktarılan veri: e-posta adresiniz ve iletideki tek kullanımlık kod. Geri bildirim gönderdiğinizde aktarılan veri: mesajınız, kategori, ekran görüntüleriniz, size dönülebilmesi için e-posta adresiniz (giriş yapmadan gönderdiyseniz formda yazdığınız adres), cihazınızın platformu ve uygulama sürümü.",
       "**GitHub Pages** — Amerika Birleşik Devletleri. Web sürümünü açtığınızda. Aktarılan veri: bağlantı bilgisi (IP adresi, tarayıcı bilgisi).",
       "**Expo (Expo Go)** — Amerika Birleşik Devletleri. Telefonda uygulama açılırken güncelleme sorulduğunda. Aktarılan veri: güncelleme sorgusu ve bağlantı bilgisi.",
@@ -639,6 +674,7 @@ export const tr = {
     retention: [
       "**Cihazınızdaki veriler**, çıkış yapana, verileri sıfırlayana ya da uygulamayı kaldırana kadar saklanır.",
       "**Buluttaki veriler**, hesabınızı silene kadar saklanır. Hesabı sildiğinizde kimliğiniz, ayarlarınız ve dolabınız silinir.",
+      "**Bir haneye eklediğiniz kayıtlar** hanenin kaydıdır: haneden ayrıldığınızda ya da çıkarıldığınızda hanede kalır, hanenin kayıtları sizin cihazlarınızdan silinir.",
       "**Geri bildirim e-postaları**, talebiniz sonuçlandıktan sonra e-posta kutusunda kalır; silinmesini istediğinizde silinir.",
     ],
 
@@ -729,6 +765,62 @@ export const tr = {
     errPersonal: "Kişisel dolabın paylaşılmaz. Paylaşmak için bir hane aç.",
     errAlreadyIn: "Bu kişi zaten hanede. Eşitlenince yetkisi burada görünür.",
     errNotShared: "Bu kişiyle artık ortak bir hanen yok, bu yüzden teklif gidemez.",
+    open: (name: string) => `${name} hanesinin kişileri`,
+    members: "Üyeler",
+    activity: "Son Değişiklikler",
+    noActivity: "Hanenin kutularında henüz bir değişiklik yok.",
+    roles: { owner: "Yönetici", editor: "Düzenleyebilir", viewer: "Yalnız görür" },
+    you: (name: string) => `${name} (sen)`,
+    unnamed: "Adsız",
+    makeEditor: (name: string) => `${name} düzenleyebilsin`,
+    makeViewer: (name: string) => `${name} yalnız görsün`,
+    remove: (name: string) => `${name} kişisini çıkar`,
+    removeTitle: "Kişi çıkarılsın mı?",
+    removeMessage: (name: string) => `${name} hanenin kutularını artık görmeyecek. Geri gelmesi için yeni bir davet gerekir.`,
+    removeConfirm: "Çıkar",
+    rename: "Hanenin adını değiştir",
+    deleteHousehold: (name: string) => `${name} hanesini sil`,
+    deleteTitle: (name: string) => `${name} hanesi silinsin mi?`,
+    deleteMessage: "Hanedeki kutular, kişiler ve yerler herkesin dolabından kalkar. Herkesin kendi dolabındakiler kendisinde kalır.",
+    deleteConfirm: "Haneyi Sil",
+    invite: "Davet Et",
+    inviteRole: "Davet edilen kişi",
+    inviteHint: "Bir bağlantı bir kişi içindir: bir kez ve 7 gün geçerli.",
+    inviteCreate: "Davet Bağlantısı Oluştur",
+    inviteShare: "Bağlantıyı Paylaş",
+    inviteCopied: "Davet bağlantısı kopyalandı",
+    inviteText: (name: string, link: string) => `Fiala'da "${name}" hanesine katıl: ${link}`,
+    cancelInvites: "Kullanılmamış Bağlantıları Geri Al",
+    cancelled: (count: number) => (count === 0 ? "Geri alınacak bağlantı yoktu" : `${count}\u00a0bağlantı geri alındı`),
+    /** Asked beside an invitation, so it says whose name it is. */
+    nameTitle: "Senin adın — diğerleri seni böyle görür",
+    nameRequired: "Adını yaz.",
+    viewOnly: (household: string) => `"${household}" hanesinde yalnız görürsün; değiştirmek için hanenin yöneticisinden düzenleme izni iste.`,
+    offerSection: "Uygulamada Teklif Et",
+    offerHint: "Başka bir hanende olan kişiye bağlantısız teklif gider; uygulamayı açınca görür.",
+    offer: "Teklif Et",
+    withdraw: "Geri Al",
+    offered: "Teklif bekliyor",
+    leave: "Haneden Ayrıl",
+    leaveTitle: (name: string) => `${name} hanesinden ayrılınsın mı?`,
+    leaveMessage: "Hanenin kutuları tüm cihazlarından kalkar; kendi kutuların sende kalır. Haneye eklediğin kutular hanede kalır: birini yanına almak için önce kutunun sayfasında \"Özel\"i seç. Geri dönmek için yeni bir davet gerekir.",
+    leaveConfirm: "Ayrıl",
+    left: (name: string) => `${name} hanesinden ayrıldın`,
+    join: "Davetle Katıl",
+    joinTitle: "Davet",
+    /** What the link is to, asked before it is spent. */
+    invitedTo: (inviter: string, name: string) => `${inviter || "Biri"} seni "${name}" hanesine davet ediyor.`,
+    joinRole: (role: string) => `Hanede: ${role}.`,
+    joinBody: "Katılınca hanenin kutularını birlikte görürsünüz; kendi kutuların sende kalır.",
+    joinAccept: "Katıl",
+    decline: "Reddet",
+    declined: "Teklif reddedildi",
+    joinPaste: "Sana gönderilen davet bağlantısını buraya yapıştır.",
+    joinLink: "Davet bağlantısı",
+    joinLinkInvalid: "Bu bir Fiala davet bağlantısı değil.",
+    joinedLater: "Katıldın; hane bağlantı gelince görünecek.",
+    inviteWaiting: "Bir davet seni bekliyor: giriş yapınca açılacak.",
+    offers: "Sana Gelen Davetler",
   },
   sync: {
     title: "Eşitleme",
@@ -812,7 +904,7 @@ export const tr = {
     signOutAnyway: "Sil ve Çık",
     delete: "Hesabı Sil",
     deleteTitle: "Hesap silinsin mi?",
-    deleteBody: "Hesabın ve bütün verilerin hem bu cihazdan hem sunucudan kalıcı olarak silinir. Bu geri alınamaz.",
+    deleteBody: "Hesabın ve bütün verilerin hem bu cihazdan hem sunucudan kalıcı olarak silinir. Kurduğun haneler içindekilerle üyeleri için de silinir; üyesi olduğun hanelerde yalnız üyeliğin gider. Bu geri alınamaz.",
     deleteConfirm: "Kalıcı Olarak Sil",
     deletePasswordBody: "Hesabı silmek için şifreni gir.",
     deleteCloudFailed: "Hesap silinemedi; internet bağlantını kontrol edip tekrar dene. Hiçbir şey silinmedi.",

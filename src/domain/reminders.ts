@@ -21,9 +21,13 @@ export interface ReminderBox extends BoxFacts {
   name: string;
   /** When its amount last changed, as stored; null for a box never counted. */
   movedAt: string | null;
+  /** When the person was asked to check it (F2.9); given only to the one asked. */
+  askedAt?: string | null;
 }
 
-export type ReminderKind = "expirySoon" | "expired" | "openSoon" | "openEnded" | "low" | "empty" | "undated" | "check";
+export type ReminderKind = "expirySoon" | "expired" | "openSoon" | "openEnded" | "low" | "empty" | "undated" | "check" | HouseholdKind;
+/** Said in the centre alone, of the person's households (F2.9, F2.11). */
+export type HouseholdKind = "asked" | "memberJoined" | "boxAdded" | "boxLeft";
 
 /** What a person can silence (F1.29): a warning and its passing are one subject. */
 export const REMINDER_GROUPS = {
@@ -32,6 +36,7 @@ export const REMINDER_GROUPS = {
   stock: ["low", "empty"],
   undated: ["undated"],
   check: ["check"],
+  household: ["asked", "memberJoined", "boxAdded", "boxLeft"],
 } as const satisfies Record<string, readonly ReminderKind[]>;
 export type ReminderGroup = keyof typeof REMINDER_GROUPS;
 
@@ -41,6 +46,9 @@ export interface Reminder {
   at: Date;
   name: string | null;
   target: NotificationTarget;
+  /** Of a household's: the member who did it, and how many boxes it was. */
+  by?: string;
+  count?: number;
 }
 
 /**
@@ -50,7 +58,8 @@ export interface Reminder {
  * carries a name either: the payload is readable by whatever reads the
  * notification.
  */
-export type NotificationTarget = { kind: "box"; id: string } | { kind: "cabinet" };
+// A household is never a phone's target: what the centre alone says may open one.
+export type NotificationTarget = { kind: "box"; id: string } | { kind: "cabinet" } | { kind: "household"; id: string };
 
 const TARGET_KEY = "fialaTarget";
 
@@ -65,11 +74,12 @@ export function readTarget(data: unknown): NotificationTarget | null {
   return raw?.kind === "box" && typeof raw.id === "string" && raw.id !== "" ? { kind: "box", id: raw.id } : null;
 }
 
-export type ReminderRoute = { pathname: "/cabinet" } | { pathname: "/box/[id]"; params: { id: string } };
+export type ReminderRoute = { pathname: "/cabinet" } | { pathname: "/box/[id]" | "/household/[id]"; params: { id: string } };
 
 /** A box gone since opens its page, which says so. */
 export function routeOf(target: NotificationTarget): ReminderRoute {
-  return target.kind === "box" ? { pathname: "/box/[id]", params: { id: target.id } } : { pathname: "/cabinet" };
+  if (target.kind === "cabinet") return { pathname: "/cabinet" };
+  return { pathname: target.kind === "box" ? "/box/[id]" : "/household/[id]", params: { id: target.id } };
 }
 
 function momentOf(day: string, shift: number, hour: number): Date {
@@ -106,6 +116,8 @@ export interface ReminderInput {
   hour: number;
   /** What the person silenced: neither planned nor listed in the centre. */
   muted: readonly ReminderGroup[];
+  /** What happened in the person's households, for the centre: never planned. */
+  events?: readonly Reminder[];
 }
 
 /**
@@ -114,19 +126,21 @@ export interface ReminderInput {
  * one per kind and moment, opening the cabinet: one naming a box would hand
  * back the identity just hidden (Helix's `privateNotificationTarget`).
  */
-function remindersAround({ now, boxes, names, hour, muted }: ReminderInput, ahead: boolean): Reminder[] {
+function remindersAround({ now, boxes, names, hour, muted, events = [] }: ReminderInput, ahead: boolean): Reminder[] {
   const edge = new Date(now);
   edge.setDate(edge.getDate() + (ahead ? HORIZON_DAYS : -HORIZON_DAYS));
   const [from, to] = ahead ? [now, edge] : [edge, now];
   const home = boxes.filter((box) => box.disposition == null);
+  const about = (kind: ReminderKind, at: Date, box: ReminderBox): Reminder =>
+    names ? { kind, at, name: box.name, target: { kind: "box", id: box.id } } : { kind, at, name: null, target: { kind: "cabinet" } };
   const all: Reminder[] = home.flatMap((box) =>
-      boxMoments(box)
-        .filter(([, day]) => day != null)
-        .map(([kind, day, shift]): Reminder => {
-          const at = momentOf(day!, shift, hour);
-          return names ? { kind, at, name: box.name, target: { kind: "box", id: box.id } } : { kind, at, name: null, target: { kind: "cabinet" } };
-        }),
+    boxMoments(box)
+      .filter(([, day]) => day != null)
+      .map(([kind, day, shift]) => about(kind, momentOf(day!, shift, hour), box)),
   );
+  // An ask is said when it came, not at the hour, and only by the centre: one from a clock ahead is not the phone's to plan.
+  if (!ahead) for (const box of home) if (box.askedAt) all.push(about("asked", new Date(box.askedAt), box));
+  if (!ahead) all.push(...events);
   // The cabinet check, on the first of each month, of a cabinet with something in it: thirty days either way hold two at most.
   if (home.length > 0) {
     for (const month of [-1, 0, 1, 2]) all.push({ kind: "check", at: new Date(now.getFullYear(), now.getMonth() + month, 1, hour), name: null, target: { kind: "cabinet" } });

@@ -14,7 +14,6 @@ import Save from "lucide-react-native/icons/save";
 import FileUp from "lucide-react-native/icons/file-up";
 import ScanLine from "lucide-react-native/icons/scan-line";
 
-import { useSession } from "../auth/session";
 import { addNamed, addPackage, findProduct, hasBox, type PackageFields } from "../data/cabinet";
 import { useCabinet, useLocations, usePeople, useSettings } from "../data/hooks";
 import { giveHealthConsent, hasHealthConsent, profileChoice } from "../data/settings";
@@ -23,7 +22,7 @@ import { normalGtin, parseAmount, parseDay, printedGtin, readBoxCode } from "../
 import { tr } from "../i18n/tr";
 import { canScan, launchScanner, onScanned } from "../services/barcode-scan";
 import { Body, Button, ChoiceTile, Notice, Screen, SectionHeader, TextField, rowsOf } from "../ui/components";
-import { NamedChoices } from "../ui/named-choices";
+import { CabinetChoice, NamedChoices, useCabinetChoice } from "../ui/named-choices";
 import { appConfirm } from "../ui/dialog";
 import { useDirtyExitGuard } from "../ui/dirty-exit";
 import { radioGroupKeys } from "../ui/keys";
@@ -85,18 +84,26 @@ export default function AddBoxScreen() {
   const router = useRouter();
   // From a product's page: another box of it, so only the box is asked. From Durum's scan button, the scanner opens at once.
   const { product: heldId, scan: scanFirst } = useLocalSearchParams<{ product?: string; scan?: string }>();
-  const cabinetId = useSession((s) => s.userId);
   const held = useCabinet().data.find((product) => product.id === heldId);
+  const target = useCabinetChoice();
+  // Another box of a product goes where the product is.
+  const cabinetId = held?.cabinetId ?? target.cabinetId;
   const settings = useSettings();
-  const people = usePeople();
-  const locations = useLocations();
+  const people = usePeople().data.filter((each) => each.cabinetId === cabinetId);
+  const locations = useLocations().data.filter((each) => each.cabinetId === cabinetId);
   const [fields, setFields] = useState(EMPTY);
   const [unit, setUnit] = useState<Unit>("tablet");
   // Undefined until the form chooses: then the account's default (F1.28), while that person or place still exists.
   const [personChoice, setPersonId] = useState<string | null>();
   const [locationChoice, setLocationId] = useState<string | null>();
-  const personId = personChoice === undefined ? profileChoice(settings.data, "owner", people.data) : personChoice;
-  const locationId = locationChoice === undefined ? profileChoice(settings.data, "place", locations.data) : locationChoice;
+  const personId = personChoice === undefined ? profileChoice(settings.data, "owner", cabinetId, people) : personChoice;
+  const locationId = locationChoice === undefined ? profileChoice(settings.data, "place", cabinetId, locations) : locationChoice;
+  // A person or a place belongs to one cabinet: another cabinet starts again from its defaults.
+  const chooseOwn = (to: boolean) => {
+    target.setOwn(to);
+    setPersonId(undefined);
+    setLocationId(undefined);
+  };
   const [scanNote, setScanNote] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -235,6 +242,8 @@ export default function AddBoxScreen() {
         </View>
       )}
 
+      <CabinetChoice household={held ? null : target.open} own={target.own} onChoose={chooseOwn} />
+
       <SectionHeader>{tr.addBox.medicineSection}</SectionHeader>
       {held ? (
         <Body style={{ marginBottom: spacing.md }}>{tr.common.joined(held.name, held.strength ?? undefined, held.form ?? undefined)}</Body>
@@ -276,8 +285,8 @@ export default function AddBoxScreen() {
       {field("serial", tr.addBox.serial, { placeholder: tr.placeholders.serial, autoCapitalize: "characters" })}
       {field("lot", tr.addBox.lot, { placeholder: tr.placeholders.lot, autoCapitalize: "characters" })}
 
-      <NamedChoices table="people" named={people.data} chosen={personId} onChoose={setPersonId} onAdd={(name) => addChoice("people", name)} />
-      <NamedChoices table="locations" named={locations.data} chosen={locationId} onChoose={setLocationId} onAdd={(name) => addChoice("locations", name)} />
+      <NamedChoices table="people" named={people} chosen={personId} onChoose={setPersonId} onAdd={(name) => addChoice("people", name)} />
+      <NamedChoices table="locations" named={locations} chosen={locationId} onChoose={setLocationId} onAdd={(name) => addChoice("locations", name)} />
 
       {failure ? <Notice tone="error" text={failure} /> : null}
       <View style={{ alignItems: "flex-start", marginVertical: spacing.lg }}>

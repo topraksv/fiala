@@ -16,7 +16,8 @@ const ACCOUNT_FROZEN = "account_frozen";
 /** Explicit consent to keep health data (KVKK m. 6), apart from the notice's acceptance at sign-up. */
 export const HEALTH_CONSENT = "health_consent";
 /** Raised when the consent's text changes what it covers, so it is asked again. */
-const HEALTH_CONSENT_VERSION = 1;
+// 2: a household's members read what is added to it (F2.2), which the first text said only the person did.
+const HEALTH_CONSENT_VERSION = 2;
 
 interface Setting {
   key: string;
@@ -64,23 +65,58 @@ export function hasHealthConsent(all: readonly Setting[]): boolean {
 export const giveHealthConsent = () => writeSetting(HEALTH_CONSENT, { version: HEALTH_CONSENT_VERSION, at: nowIso() });
 
 /**
- * Who the account is among the cabinet's people, and whose and where a new
- * box is unless chosen otherwise (`docs/TASKS.md` F1.28): ids, so a renamed
- * person stays chosen, and one deleted is no choice.
+ * Who the account is among a cabinet's people, and whose and where a new box
+ * is unless chosen otherwise (`docs/TASKS.md` F1.28): one id for each cabinet,
+ * since each has its own people and places (F2.4), so a household's choice
+ * leaves the person's own. Ids, so a renamed person stays chosen, and one
+ * deleted is no choice.
  */
 const PROFILE = { me: "profile_person", owner: "default_person", place: "default_location" } as const;
+const NAMED_IN = { me: "people", owner: "people", place: "locations" } as const;
 export type ProfileChoice = keyof typeof PROFILE;
 
-/** The id chosen among `named`, or null: none chosen, one deleted since, or a value this build cannot read. */
-export function profileChoice(all: readonly Setting[], choice: ProfileChoice, named: readonly { id: string }[]): string | null {
+function storedChoice(all: readonly Setting[], choice: ProfileChoice): unknown {
   try {
-    const id: unknown = JSON.parse(String(Object.fromEntries(all.map(({ key, value }) => [key, value]))[PROFILE[choice]]));
-    return named.some((each) => each.id === id) ? (id as string) : null;
+    return JSON.parse(String(all.find(({ key }) => key === PROFILE[choice])?.value));
   } catch {
     return null;
   }
 }
 
-export const chooseProfile = (choice: ProfileChoice, id: string | null) => writeSetting(PROFILE[choice], id);
+const isMap = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+
+/** The id chosen in `cabinetId` among `named`, or null: none chosen, one deleted since, or a value this build cannot read. */
+export function profileChoice(all: readonly Setting[], choice: ProfileChoice, cabinetId: string | null, named: readonly { id: string }[]): string | null {
+  const value = storedChoice(all, choice);
+  // One id is how a build before households kept it: the person's own cabinet's, the only one there was.
+  const id = typeof value === "string" ? value : isMap(value) && cabinetId ? value[cabinetId] : null;
+  return named.some((each) => each.id === id) ? (id as string) : null;
+}
+
+/** Chooses in one cabinet and keeps every other's; an id kept the old way goes under its own cabinet first. */
+export const chooseProfile = (choice: ProfileChoice, cabinetId: string, id: string | null) =>
+  writeRows(async () => {
+    const value = storedChoice(await readSettings(), choice);
+    const old = typeof value === "string" ? await findRow(NAMED_IN[choice], value) : null;
+    const kept = isMap(value) ? value : old ? { [String(old.cabinet_id)]: value } : {};
+    return settingWrite(PROFILE[choice], { ...kept, [cabinetId]: id });
+  });
+
+/** The household Dolabım shows beside the person's own cabinet (`docs/TASKS.md` F2.4), followed to every device. */
+const OPEN_HOUSEHOLD = "open_household";
+
+/** The one chosen, or the first by name when none is, or the one chosen has gone. */
+export function openHouseholdOf<T extends { id: string }>(all: readonly Setting[], households: readonly T[]): T | null {
+  const value = all.find(({ key }) => key === OPEN_HOUSEHOLD)?.value;
+  let chosen: unknown;
+  try {
+    chosen = JSON.parse(String(value));
+  } catch {
+    // Unreadable is none chosen.
+  }
+  return households.find((each) => each.id === chosen) ?? households[0] ?? null;
+}
+
+export const chooseHousehold = (id: string) => writeSetting(OPEN_HOUSEHOLD, id);
 
 export const recordDeviceLogin = (device: string, login: DeviceLogin) => writeSetting(LOGIN_KEY_PREFIX + device, login);

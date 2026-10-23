@@ -15,8 +15,11 @@ import { migrateDb } from "../db/migrate";
 import { tr } from "../i18n/tr";
 import { kv } from "../services/kv";
 import { followReminderTaps, remindersAvailable, replanReminders } from "../services/reminders";
-import { useAccountFrozen } from "../data/hooks";
-import { syncNow } from "../sync/engine";
+import { useAccountFrozen, useHouseholds } from "../data/hooks";
+import { scheduleSync, syncNow } from "../sync/engine";
+import { followCabinets, startLive, stopLive } from "../sync/live";
+import { realtimeAccess } from "../sync/supabase";
+import { heldInvite, holdInvite, inviteFromPage } from "../sync/sharing";
 import { Button, EmptyState } from "../ui/components";
 import { appError, OverlaySlot } from "../ui/dialog";
 import { FOCUS_PROPERTY } from "../ui/focus-ring";
@@ -37,6 +40,14 @@ const Inter_600SemiBold = require("../../assets/fonts/Inter_600SemiBold.ttf");
 const IBMPlexSerif_600SemiBold = require("../../assets/fonts/IBMPlexSerif_600SemiBold.ttf");
 
 const WEB = Platform.OS === "web" && typeof location !== "undefined";
+
+/**
+ * A web invitation opened signed out: signing in sends the page to the tabs
+ * and the fragment with it, so the token is held here, once, and the
+ * invitation reopened after (Gital's).
+ */
+const invitedTo = WEB ? inviteFromPage(location) : null;
+if (invitedTo) void holdInvite(invitedTo);
 
 // At module load, as the package asks: from inside a component it can come
 // after the splash has already gone. `Launch` hides it.
@@ -215,6 +226,13 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
   }, []);
   // An undo offered to one account must not run against the next one's data.
   useEffect(() => clearUndo(), [userId]);
+  useEffect(() => {
+    if (!signedIn || !WEB) return;
+    void heldInvite({ take: true }).then((token) => {
+      // Signed in already, the invitation page opened with its own fragment.
+      if (token && !/\/invite\/?$/.test(location.pathname)) router.push({ pathname: "/invite", params: { token } });
+    });
+  }, [signedIn]);
   const settled = ready && !(signedIn && frozen == null) && lockedHere != null;
   // The launch screen stays over this gap, so it never shows as a blank frame.
   useEffect(() => {
@@ -242,6 +260,9 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
             <Stack.Screen name="import" />
             <Stack.Screen name="product/[id]" />
             <Stack.Screen name="names/[table]" />
+            <Stack.Screen name="household/[id]" />
+            <Stack.Screen name="invite" />
+            <Stack.Screen name="households" />
             <Stack.Screen name="person/[id]" />
             <Stack.Screen name="to-buy" />
             <Stack.Screen name="to-dispose" />
@@ -262,6 +283,7 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
       {signedIn ? (
         <>
           <SyncRunner userId={userId} />
+          <LiveRunner userId={userId} />
           <ReminderPlanner />
           {locked || lockedHere ? null : <ReminderTaps />}
         </>
@@ -287,6 +309,29 @@ function SyncRunner({ userId }: { userId: string }) {
       clearInterval(poll);
     };
   }, [userId]);
+  return null;
+}
+
+/**
+ * A shared household is live (`docs/TASKS.md` F2.6): what someone else
+ * changed is pulled within seconds rather than at the next poll, which stays
+ * behind it for a nudge the socket lost. A person who shares nothing never
+ * loads the socket. Gital's.
+ */
+function LiveRunner({ userId }: { userId: string }) {
+  const households = useHouseholds().households.data;
+  const cabinets = households
+    .filter((household) => household.members.length > 1 && household.members.some((member) => member.userId === userId))
+    .map((household) => household.id)
+    .join(",");
+  const shared = cabinets !== "";
+  useEffect(() => {
+    const access = shared ? realtimeAccess() : null;
+    if (!access) return;
+    startLive({ ...access, userId, onMoved: () => scheduleSync(userId) }).catch(() => {});
+    return stopLive;
+  }, [userId, shared]);
+  useEffect(() => followCabinets(cabinets ? cabinets.split(",") : []), [cabinets]);
   return null;
 }
 

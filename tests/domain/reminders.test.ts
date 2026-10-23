@@ -162,11 +162,32 @@ describe("the notification centre", () => {
   });
 });
 
+describe("an ask to check a box", () => {
+  it("is listed when it came, at its own minute, for a box at home, and never planned ahead", () => {
+    const asked = new Date(2026, 8, 23, 18, 42).toISOString();
+    const boxes = [box({ askedAt: asked }), box({ id: idAt(now), name: "Majezik", askedAt: asked, disposition: "used" })];
+    expect(pastReminders(input({ boxes })).filter((notice) => notice.kind === "asked")).toEqual([{ kind: "asked", at: new Date(asked), name: "Parol", target: onBox() }]);
+    expect(planReminders(input({ now: new Date(2026, 8, 23, 18), boxes })).some((reminder) => reminder.kind === "asked"), "ahead of it, nothing").toBe(false);
+  });
+});
+
+describe("what happened in a household", () => {
+  it("is listed with the rest over thirty days, silenced as one, and never planned", () => {
+    const joined = { kind: "memberJoined" as const, at: at(20), name: "Ev", by: "Ali", count: 1, target: { kind: "household" as const, id: "ev" } };
+    const old = { ...joined, kind: "boxAdded" as const, at: at(20, 7) };
+    expect(pastReminders(input({ events: [joined, old] })), "a month ago is gone").toEqual([joined]);
+    expect(pastReminders(input({ events: [joined], muted: ["household"] }))).toEqual([]);
+    expect(planReminders(input({ now: at(19), events: [joined] }))).toEqual([]);
+  });
+});
+
 describe("a tap", () => {
-  it("opens the box or the cabinet the notification names", () => {
+  it("opens the box, the cabinet or the household the notice names", () => {
     expect(routeOf(readTarget(targetPayload({ kind: "box", id: "b" }))!)).toEqual({ pathname: "/box/[id]", params: { id: "b" } });
     expect(readTarget(targetPayload({ kind: "cabinet" }))).toEqual({ kind: "cabinet" });
     expect(routeOf({ kind: "cabinet" })).toEqual({ pathname: "/cabinet" });
+    expect(routeOf({ kind: "household", id: "ev" })).toEqual({ pathname: "/household/[id]", params: { id: "ev" } });
+    expect(readTarget(targetPayload({ kind: "household", id: "ev" })), "never a phone's").toBeNull();
   });
 
   it("opens nothing from a payload this build did not write", () => {

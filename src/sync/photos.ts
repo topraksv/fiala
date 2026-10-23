@@ -20,8 +20,8 @@ const SIZES = [
   ["thumb", "thumb"],
 ] as const;
 
-/** The tables whose rows name a photo: a person, a product, a box. */
-export const PHOTO_TABLES: ReadonlySet<SyncedTableName> = new Set(["people", "products", "packages"]);
+/** The tables whose rows name a photo: a person, a product, a box, a household. */
+export const PHOTO_TABLES: ReadonlySet<SyncedTableName> = new Set(["people", "products", "packages", "cabinets"]);
 
 /** The photos a live row of those tables names. */
 const NAMED = [...PHOTO_TABLES].map((table) => `SELECT photo_id FROM ${table} WHERE deleted_at IS NULL`).join(" UNION ");

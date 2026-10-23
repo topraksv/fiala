@@ -34,7 +34,8 @@ describe("the web build's network boundary", () => {
 
   it("lets the page reach its project by HTTPS", () => {
     const policy = contentSecurityPolicy("https://project-ref.supabase.co");
-    expect(directive(policy, "connect-src")).toBe("connect-src 'self' https://project-ref.supabase.co");
+    expect(directive(policy, "connect-src")).toBe("connect-src 'self' https://project-ref.supabase.co wss://project-ref.supabase.co");
+    expect(directive(contentSecurityPolicy("http://127.0.0.1:54321"), "connect-src"), "the local stack's socket").toBe("connect-src 'self' http://127.0.0.1:54321 ws://127.0.0.1:54321");
   });
 
   it("says every other source the page may use, in this order", () => {

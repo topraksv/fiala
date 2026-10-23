@@ -1,4 +1,4 @@
-import { memo, useRef, useState, type ReactNode, type Ref } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Text, View, useWindowDimensions, type TextInput } from "react-native";
 import CloudOff from "lucide-react-native/icons/cloud-off";
 import { useRouter } from "expo-router";
@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 import { isValidNewPassword, useSession } from "../../auth/session";
 import { isEmail } from "../../domain/names";
 import { tr } from "../../i18n/tr";
+import { heldInvite } from "../../sync/sharing";
 import { Body, Button, Card, CODE_FIELD, CODE_LENGTH, EMAIL_FIELD, Notice, Screen, TextField } from "../../ui/components";
 import { interactionSurface } from "../../ui/interaction";
 import { Press } from "../../ui/press";
@@ -146,6 +147,16 @@ function OfflineNote() {
       <Text style={[type.small, { color: palette.textSecondary, textAlign: "center", flexShrink: 1 }]}>{tr.auth.offlineNote}</Text>
     </View>
   );
+}
+
+/**
+ * A web invitation waits for the sign-in. Saying so keeps the person from
+ * going to the app for it, which would ask for the link again (Gital's).
+ */
+function InviteWaiting() {
+  const [invited, setInvited] = useState(false);
+  useEffect(() => void heldInvite().then((token) => setInvited(token != null)), []);
+  return invited ? <Notice tone="success" text={tr.sharing.inviteWaiting} /> : null;
 }
 
 /** The address, which is the last field only when a reset code is all that is asked for. */
@@ -297,6 +308,7 @@ export default function SignInScreen() {
         <AuthGreeting wide={wide} />
         {/* One skeleton for every mode, so switching does not redraw a card of each size. */}
         <AuthColumn wide={wide} share={0.92}>
+          <InviteWaiting />
           <Card>
             <Text accessibilityRole="header" aria-level={2} style={[type.heading, { color: palette.text, marginBottom: spacing.xs }]}>{text.heading}</Text>
             <Body muted style={{ marginBottom: spacing.lg }}>{text.subtitle(email.trim())}</Body>

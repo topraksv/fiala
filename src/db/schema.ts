@@ -43,6 +43,8 @@ export const cabinets = sqliteTable("cabinets", {
   ...syncColumns,
   ownerId: text("owner_id").notNull(),
   name: text("name").notNull().default(""),
+  /** A household's photo (F2.3), set by its owner; the personal cabinet has none. */
+  photoId: text("photo_id"),
 });
 
 /** Gital's `MEMBER_ROLES`: one owner, who made the cabinet, then editors and viewers. */
@@ -178,6 +180,9 @@ export const packages = sqliteTable(
     /** Its own warning ahead of its expiry, over its owner's. */
     warnDays: integer("warn_days"),
     photoId: text("photo_id"),
+    /** The member asked to check it (F2.9), and when; both or neither. Cleared once checked. */
+    checkOf: text("check_of"),
+    checkAskedAt: text("check_asked_at"),
   },
   (t) => [index("idx_packages_product_id").on(t.productId)],
 );
@@ -196,14 +201,15 @@ export const packageMoves = sqliteTable(
     packageId: text("package_id").notNull(),
     quantityMilli: integer("quantity_milli").notNull(),
     reason: text("reason", { enum: MOVE_REASONS }).notNull(),
+    /** The account that wrote it, stamped by the server (F2.8); none until it is pushed, which is this device's own. */
+    createdBy: text("created_by"),
   },
   (t) => [index("idx_package_moves_package_id").on(t.packageId)],
 );
 
 /**
  * What an edit changed on a box, as JSON: each field it changed, before and
- * after. Its moves are its amount's history; this is the rest's. Who changed
- * it comes with a household's members (F2.8).
+ * after. Its moves are its amount's history; this is the rest's.
  */
 export const packageChanges = sqliteTable(
   "package_changes",
@@ -211,6 +217,8 @@ export const packageChanges = sqliteTable(
     ...cabinetColumns,
     packageId: text("package_id").notNull(),
     changes: text("changes").notNull(),
+    /** As a move's. */
+    createdBy: text("created_by"),
   },
   (t) => [index("idx_package_changes_package_id").on(t.packageId)],
 );

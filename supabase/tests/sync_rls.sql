@@ -8,7 +8,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(57);
+select extensions.plan(60);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -178,6 +178,21 @@ select lives_ok(
      where id = 'c2000000-0000-8000-8000-00000000000c'$$,
   'A notes, stars and wants Parol'
 );
+select is(
+  pg_temp.exec_sqlstate($$insert into public.package_changes (cabinet_id, id, package_id, changes, created_by) values
+    ('10000000-0000-4000-8000-000000000001', 'ce000000-0000-7000-8000-00000000000c', 'c1000000-0000-7000-8000-00000000000c', '{"note":[null,"x"]}', '20000000-0000-4000-8000-000000000002');
+    insert into public.package_moves (cabinet_id, id, package_id, quantity_milli, reason, created_by) values
+    ('10000000-0000-4000-8000-000000000001', 'c3000000-0000-7000-8000-00000000000c', 'c1000000-0000-7000-8000-00000000000c', 20000, 'initial', '20000000-0000-4000-8000-000000000002')
+    on conflict (cabinet_id, id) do update set created_by = excluded.created_by$$),
+  null,
+  'A writes an edit and pushes its move again, each naming B as its writer'
+);
+select is(
+  (select array[(select created_by from public.package_changes where id = 'ce000000-0000-7000-8000-00000000000c'),
+                (select created_by from public.package_moves where id = 'c3000000-0000-7000-8000-00000000000c')]::text),
+  array['10000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001']::uuid[]::text,
+  'the server names A, who wrote both, and keeps it'
+);
 -- A second phone that never pulled Parol scans the same box: its own row under the same id, as an upsert sends it.
 select lives_ok(
   $$insert into public.products (cabinet_id, id, name, gtin, strength, note, starred, wanted, photo_id, created_at) values
@@ -225,6 +240,12 @@ select is(
     ('10000000-0000-4000-8000-000000000001', 'cd000000-0000-7000-8000-00000000000c', 'c2000000-0000-8000-8000-00000000000c', 'tablet', 0)$$),
   '23514',
   'a warning no days ahead is refused'
+);
+select is(
+  pg_temp.exec_sqlstate($$insert into public.packages (cabinet_id, id, product_id, unit, check_of) values
+    ('10000000-0000-4000-8000-000000000001', 'cf000000-0000-7000-8000-00000000000c', 'c2000000-0000-8000-8000-00000000000c', 'tablet', '20000000-0000-4000-8000-000000000002')$$),
+  '23514',
+  'an ask to check a box names both whom and since when'
 );
 select is(
   pg_temp.exec_sqlstate($$insert into public.products (cabinet_id, id, name, gtin) values

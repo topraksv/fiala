@@ -12,7 +12,7 @@ import Share from "lucide-react-native/icons/share";
 import ShoppingBasket from "lucide-react-native/icons/shopping-basket";
 
 import { editProduct, type CabinetProduct } from "../data/cabinet";
-import { useCabinet } from "../data/hooks";
+import { useHouseholds, useShownCabinet } from "../data/hooks";
 import { isEmpty, isLow } from "../domain/boxes";
 import { tr } from "../i18n/tr";
 import { shareText } from "../services/share";
@@ -23,7 +23,8 @@ import { showNotice, showUndo } from "../ui/undo";
 const titleOf = (product: CabinetProduct) => tr.common.joined(product.name, product.strength ?? undefined);
 
 export default function ToBuy() {
-  const cabinet = useCabinet();
+  const cabinet = useShownCabinet();
+  const { writes } = useHouseholds();
   const wanted = cabinet.data.filter((product) => product.wanted);
   const running = cabinet.data.filter((product) => {
     const home = product.boxes.filter((box) => box.disposition == null);
@@ -68,7 +69,7 @@ export default function ToBuy() {
             <ListRow
               key={product.id}
               title={titleOf(product)}
-              right={<IconButton icon={Check} label={tr.toBuy.bought(titleOf(product))} tone="primary" onPress={() => void mark(product, false)} />}
+              right={writes(product.cabinetId) ? <IconButton icon={Check} label={tr.toBuy.bought(titleOf(product))} tone="primary" onPress={() => void mark(product, false)} /> : undefined}
             />
           ))}
         </Card>
@@ -81,7 +82,7 @@ export default function ToBuy() {
               <ListRow
                 key={product.id}
                 title={titleOf(product)}
-                right={<IconButton icon={Plus} label={tr.toBuy.add(titleOf(product))} onPress={() => void mark(product, true)} />}
+                right={writes(product.cabinetId) ? <IconButton icon={Plus} label={tr.toBuy.add(titleOf(product))} onPress={() => void mark(product, true)} /> : undefined}
               />
             ))}
           </Card>
