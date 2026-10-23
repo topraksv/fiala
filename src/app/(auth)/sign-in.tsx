@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ReactNode, type Ref } from "react";
-import { Text, View, useWindowDimensions, type TextInput } from "react-native";
+import { Text, View, useWindowDimensions, type TextInputInstance } from "react-native";
 import CloudOff from "lucide-react-native/icons/cloud-off";
 import { useRouter } from "expo-router";
 
@@ -193,7 +193,7 @@ function CodeField({ value, onChangeText, onSubmit }: { value: string; onChangeT
 }
 
 /** Sign-up's password is a new one, checked as it is typed; sign-in's is only the one already set. */
-function PasswordField({ ref, creating, value, onChangeText, onSubmit }: { ref: Ref<TextInput>; creating: boolean; value: string; onChangeText: (value: string) => void; onSubmit: () => void }) {
+function PasswordField({ ref, creating, value, onChangeText, onSubmit }: { ref: Ref<TextInputInstance>; creating: boolean; value: string; onChangeText: (value: string) => void; onSubmit: () => void }) {
   return (
     <TextField
       ref={ref}
@@ -240,7 +240,7 @@ export default function SignInScreen() {
   /** Only after a refused press: the form does not scold while it is being filled. */
   const [consentRefused, setConsentRefused] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
-  const passwordRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInputInstance>(null);
 
   const text = MODE[mode];
   // Consent is kept out of `formReady`, so the button stays pressable while it

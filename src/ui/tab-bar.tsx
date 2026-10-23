@@ -11,7 +11,18 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Keyboard, PanResponder, Platform, Text, View, useWindowDimensions, type ViewStyle } from "react-native";
+import {
+  Animated,
+  Keyboard,
+  PanResponder,
+  Platform,
+  Text,
+  View,
+  useWindowDimensions,
+  type ViewStyle,
+  type TextInstance,
+  type ViewInstance,
+} from "react-native";
 import type { BottomTabBarProps } from "expo-router/js-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { springTo, useReducedMotion, useReduceTransparency, useSpringTo } from "./motion";
@@ -65,7 +76,7 @@ function useKeyboardShown(): boolean {
   return shown;
 }
 
-export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+export function TabBar({ state, descriptors, emitter, navigateToTab }: BottomTabBarProps) {
   const { palette, scheme } = useTheme();
   const insets = useSafeAreaInsets();
   const keyboardShown = useKeyboardShown();
@@ -81,7 +92,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     : null;
   const materialFill = navigationMaterial(palette.surface, { glass, isWeb, compact: shouldUseCompactNavigationMaterial(width) });
 
-  const barRef = useRef<View>(null);
+  const barRef = useRef<ViewInstance>(null);
   const [barWidth, setBarWidth] = useState(0);
   const [barX, setBarX] = useState(0);
   // The columns share what lies inside the outline and the padding;
@@ -99,28 +110,37 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   useSpringTo(selection, state.index);
 
   // Rebuilt only when the bar moves, never mid-scrub: a new responder would
-  // drop the gesture in flight. The current tab is read from the navigator at
-  // event time, not from a ref written during render.
+  // drop the gesture in flight. SDK 58 hands the bar no navigator to ask, so
+  // an effect keeps the current tab in a box the handlers read at event time;
+  // a ref would be read the same way, but the compiler cannot tell that from
+  // inside `PanResponder.create`.
+  // The navigator rebuilds `navigateToTab` every render, so it rides in the box
+  // too, or the responder would be rebuilt with it.
+  const [live] = useState(() => {
+    let current = { state, emitter, navigateToTab };
+    return { get: () => current, set: (next: typeof current) => void (current = next) };
+  });
+  useEffect(() => live.set({ state, emitter, navigateToTab }), [live, state, emitter, navigateToTab]);
   const pan = useMemo(() => {
     const goToIndex = (index: number) => {
-      const { routes, index: current } = navigation.getState();
+      const { state: { routes, index: current }, emitter: events, navigateToTab: navigate } = live.get();
       const route = routes[index];
       if (!route || index === current) return;
-      const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
-      if (!event.defaultPrevented) navigation.navigate(route.name, route.params);
+      const event = events.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
+      if (!event.defaultPrevented) navigate(route.key);
     };
     return PanResponder.create({
       onMoveShouldSetPanResponder: (_event, gesture) =>
         Math.abs(gesture.dx) > DRAG_CLAIM_DISTANCE
         && Math.abs(gesture.dx) > Math.abs(gesture.dy) * DRAG_HORIZONTAL_BIAS,
       onPanResponderMove: (_event, gesture) => {
-        const count = navigation.getState().routes.length;
+        const count = live.get().state.routes.length;
         if (slotWidth <= 0 || count === 0) return;
         const slot = Math.floor((gesture.moveX - barX - edge) / slotWidth);
         goToIndex(Math.min(Math.max(slot, 0), count - 1));
       },
     });
-  }, [navigation, barX, edge, slotWidth]);
+  }, [live, barX, edge, slotWidth]);
 
   // The outline gives the bar an edge on a near-black page, where the shadow
   // has nothing to fall onto.
@@ -161,8 +181,8 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         aria-selected={focused}
         accessibilityLabel={options.tabBarAccessibilityLabel}
         onPress={() => {
-          const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
-          if (!focused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
+          const event = emitter.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
+          if (!focused && !event.defaultPrevented) navigateToTab(route.key);
         }}
         style={({ pressed }) => ({
           flex: 1,
@@ -309,7 +329,7 @@ function TabLabel({ id, label, focused, hidden, slotWidth, onMeasure }: {
   onMeasure: (id: string, width: number) => void;
 }) {
   const { palette } = useTheme();
-  const ref = useRef<Text>(null);
+  const ref = useRef<TextInstance>(null);
   useLayoutEffect(() => {
     const measured = measureLabelText(ref.current as unknown as HTMLElement | null);
     if (measured.width > 0) onMeasure(id, measured.wrapped ? tooWide(slotWidth) : measured.width);

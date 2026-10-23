@@ -50,6 +50,20 @@
       "when": 1792749511537,
       "tag": "0006_box_check",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792765046744,
+      "tag": "0007_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792771563418,
+      "tag": "0008_doses",
+      "breakpoints": true
     }
   ]
 }

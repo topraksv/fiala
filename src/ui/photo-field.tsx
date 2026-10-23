@@ -113,8 +113,8 @@ export function PhotoField({
   );
 }
 
-/** One way to bring a photo in, drawn as the empty frame it would fill. */
-function Source({ icon: Icon, label, onPress }: { icon: LucideIcon; label: string; onPress: () => void }) {
+/** One way to bring a photo in, drawn as the empty frame it would fill; a document's file too. */
+export function Source({ icon: Icon, label, onPress }: { icon: LucideIcon; label: string; onPress: () => void }) {
   const { palette } = useTheme();
   return (
     <Press

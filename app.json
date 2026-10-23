@@ -83,7 +83,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router",
+      ["expo-router", { "asyncRoutes": { "web": false } }],
       [
         "expo-splash-screen",
         {
@@ -119,7 +119,9 @@
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "expo-sharing",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true,

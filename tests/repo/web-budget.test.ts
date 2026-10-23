@@ -77,7 +77,7 @@ describe("check-published", () => {
   // `sdkVersion` is right for Expo Go only: it does not move when the native
   // project does, so an update sent to a store binary could land on one that
   // cannot run it. With no `updates.url` and no channel, expo-updates is off in
-  // a store build and it runs the bundle it shipped with (Expo SDK 57 docs), so
+  // a store build and it runs the bundle it shipped with (Expo SDK 58 docs), so
   // the two share a repository safely. Giving a store build updates means
   // `fingerprint` first, and this test fails until then.
   it("builds a TestFlight binary that no Expo Go update can reach", () => {
@@ -110,6 +110,7 @@ function fixture(bundle = "console.log('ok');") {
   const js = join(root, "_expo", "static", "js", "web");
   mkdirSync(js, { recursive: true });
   writeFileSync(join(js, "entry-test.js"), bundle);
+  writeFileSync(join(root, "index.html"), '<script src="/_expo/static/js/web/entry-test.js" defer></script>');
   return { root, js };
 }
 
@@ -143,7 +144,7 @@ describe("web release budget", () => {
     const result = check(root);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("pictureBytes: 1000 bytes");
-    expect(result.stdout).toContain("totalExport: 18 bytes");
+    expect(result.stdout).toContain("totalExport: 82 bytes");
   });
 
   it("rejects source-map files and bundle references", () => {

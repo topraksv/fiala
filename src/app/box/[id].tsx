@@ -24,6 +24,7 @@ import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
 import { Body, Button, Card, IconButton, ListRow, Notice, Screen, SectionHeader } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
+import { LinkedDocuments } from "../../ui/documents";
 import { CabinetChoice, changeLines, NamedChoices, useWriter, ViewOnly } from "../../ui/named-choices";
 import { navigateBack } from "../../ui/navigation";
 import { PhotoField } from "../../ui/photo-field";
@@ -240,6 +241,8 @@ export default function BoxScreen() {
           />
         </>
       ) : null}
+
+      <LinkedDocuments target={{ package: box.id }} editable={editable} />
 
       <SectionHeader>{tr.box.historySection}</SectionHeader>
       {history.length === 0 ? (

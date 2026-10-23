@@ -7,12 +7,12 @@
  */
 
 import { useEffect, type ReactNode, type Ref } from "react";
-import { ScrollView, type ScrollViewProps } from "react-native";
+import { ScrollView, type ScrollViewProps, type ScrollViewInstance } from "react-native";
 import { isReducedMotion } from "./motion";
 import { isMobileViewportWidth } from "./responsive";
 
 export interface KeyboardSafeScrollViewProps extends ScrollViewProps {
-  ref?: Ref<ScrollView>;
+  ref?: Ref<ScrollViewInstance>;
   /** Air above the native keyboard, measured from the caret. */
   bottomOffset: number;
   /** Extra scrollable room below the form. */

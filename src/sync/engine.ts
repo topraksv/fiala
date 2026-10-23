@@ -34,6 +34,7 @@ import {
   type PullCursor,
   type RejectedOutboxEvent,
 } from "./merge-policy";
+import { sendPendingDocuments, sweepUnnamedDocuments } from "./documents";
 import { fetchMissingPhotos, PHOTO_TABLES, sendPendingPhotos, sweepUnnamedPhotos } from "./photos";
 import { keyColumns, toLocalRow, toServerRow } from "./rows";
 import { SessionEpoch, SessionEpochCancelledError, type SessionEpochToken } from "./session-epoch";
@@ -614,6 +615,8 @@ async function runSync(userId: string, token: SessionEpochToken, allowRefresh: b
     await purgeDeletedHouseholds();
     await fetchMissingPhotos(supabase, token.signal);
     await sweepUnnamedPhotos(supabase, token.signal);
+    await sendPendingDocuments(supabase, token.signal);
+    await sweepUnnamedDocuments(supabase, token.signal);
     assertActive(token);
     const state = completedSyncState(await deadLetterCount());
     retryAttempt = 0;

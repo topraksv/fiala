@@ -182,8 +182,12 @@ export async function writeUndoable(build: () => Promise<readonly RowWrite[]>): 
   return written;
 }
 
-/** Columns the write layer stamps; every other column is what the caller wrote. */
-const STAMPED = new Set(["createdAt", "updatedAt", "tombstoneVersion"]);
+/**
+ * Columns the write layer or the server stamps; every other column is what
+ * the caller wrote. The server names the writer (`created_by`, migrations 11,
+ * 14 and 15, and a dose's `answered_by`) in the answer to the push, so a row sent in between still undoes.
+ */
+const STAMPED = new Set(["createdAt", "updatedAt", "tombstoneVersion", "createdBy", "answeredBy"]);
 
 /**
  * Undo a `writeUndoable` write: each row back as it was, and a row it made
@@ -252,6 +256,6 @@ export async function resetLocalWorkspace(): Promise<void> {
   const sqlite = await getSqliteAsync();
   // One script rather than a statement per table: on the web every call is a
   // round trip to the SQLite worker, and a sign-out waited on each of them.
-  const tables = [...Object.keys(SYNCED_TABLES), "photos", "outbox", "sync_dead_letters", "sync_state"];
+  const tables = [...Object.keys(SYNCED_TABLES), "photos", "document_files", "outbox", "sync_dead_letters", "sync_state"];
   await withTransaction(() => sqlite.execAsync(tables.map((table) => `DELETE FROM ${table};`).join("\n")));
 }

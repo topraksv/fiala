@@ -17,6 +17,7 @@ import { spacing } from "../ui/theme";
 
 /** Each card by the title it has on Durum. */
 const NAMES: Record<StatusCard, string> = {
+  doses: tr.doses.todaySection,
   lists: tr.status.listsSection,
   expired: tr.status.expiredSection,
   soon: tr.status.soonSection,

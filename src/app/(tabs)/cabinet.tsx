@@ -3,6 +3,7 @@ import { View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import BriefcaseMedical from "lucide-react-native/icons/briefcase-medical";
 import Archive from "lucide-react-native/icons/archive";
+import FileText from "lucide-react-native/icons/file-text";
 import FileUp from "lucide-react-native/icons/file-up";
 import LayoutList from "lucide-react-native/icons/layout-list";
 import FolderInput from "lucide-react-native/icons/folder-input";
@@ -14,7 +15,7 @@ import Trash from "lucide-react-native/icons/trash";
 import X from "lucide-react-native/icons/x";
 
 import { editBoxes, type CabinetBox, type CabinetProduct, type Household, type Named, type NamedTable } from "../../data/cabinet";
-import { useHouseholds, useLocations, usePeople, useShownCabinet, useTags } from "../../data/hooks";
+import { useDocuments, useHouseholds, useLocations, usePeople, useShownCabinet, useTags } from "../../data/hooks";
 import { BOX_VIEWS, SOON_DAYS, boxExpiry, expiryState, formatAmount, formatDay, inView, lastOpenDay, localDay, matchesSearch, sortProducts, type BoxView } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
 import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, Screen, TextField } from "../../ui/components";
@@ -33,8 +34,9 @@ const SORTS = Object.keys(tr.cabinet.sorts) as Sort[];
 /** This device's choice of the short list: a view, not the cabinet's data. */
 const COMPACT_KEY = "cabinet_compact";
 
-/** The tag filter's tile for starred products; a tag's id is a uuid, so this names none. */
+/** The tag filter's tiles for starred products and those a document is linked to; a tag's id is a uuid, so these name none. */
 const STARRED = "starred";
+const LINKED = "linked";
 
 interface Shown {
   query: string;
@@ -42,20 +44,24 @@ interface Shown {
   view: BoxView;
   person: string | null;
   place: string | null;
-  /** A tag's id, `STARRED`, or none. */
+  /** A tag's id, `STARRED`, `LINKED`, or none. */
   tag: string | null;
+  /** The products and boxes a live document names (F1.15, F3.4). */
+  linked: ReadonlySet<string>;
   today: string;
   ownerOf: (personId: string | null) => string | undefined;
 }
 
 /** The products with a box that fits, each with only those boxes; a search finds a product by its names or a box by its nickname. */
-function visible(products: readonly CabinetProduct[], { query, sort, view, person, place, tag, today, ownerOf }: Shown): CabinetProduct[] {
+function visible(products: readonly CabinetProduct[], { query, sort, view, person, place, tag, linked, today, ownerOf }: Shown): CabinetProduct[] {
   const fits = (box: CabinetBox) => inView(view, box, today) && (person == null || box.personId === person) && (place == null || box.locationId === place);
   const found = products
-    .filter((product) => tag == null || (tag === STARRED ? product.starred : product.tagIds.includes(tag)))
+    .filter((product) => tag == null || tag === LINKED || (tag === STARRED ? product.starred : product.tagIds.includes(tag)))
     .map((product) => {
       const named = matchesSearch([product.name, product.brand, product.activeSubstance, product.strength, product.manufacturer, product.gtin], query);
-      return { ...product, boxes: product.boxes.filter((box) => fits(box) && (named || matchesSearch([box.nickname], query))) };
+      // A document linked to the product is for each of its boxes.
+      const papered = (box: CabinetBox) => tag !== LINKED || linked.has(product.id) || linked.has(box.id);
+      return { ...product, boxes: product.boxes.filter((box) => fits(box) && papered(box) && (named || matchesSearch([box.nickname], query))) };
     })
     .filter((product) => product.boxes.length > 0);
   return sortProducts(found, sort, ownerOf);
@@ -70,6 +76,8 @@ export default function Cabinet() {
   const people = usePeople().data.filter((each) => shows(each.cabinetId));
   const locations = useLocations().data.filter((each) => shows(each.cabinetId));
   const tags = useTags().data.filter((each) => shows(each.cabinetId));
+  const documents = useDocuments().data.filter((each) => shows(each.cabinetId));
+  const linked = new Set(documents.filter((each) => !each.archived).flatMap((each) => [...each.productIds, ...each.packageIds]));
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("expiry");
   const [whose, setWhose] = useState<string | null>(null);
@@ -122,8 +130,10 @@ export default function Cabinet() {
   const anyStarred = cabinet.data.some((product) => product.starred);
   // A product only on the to-buy list has nothing to show here.
   const holding = cabinet.data.some((product) => product.boxes.length > 0);
-  const tag = (filed === STARRED && anyStarred) || tags.some((each) => each.id === filed) ? filed : null;
-  const shown = visible(cabinet.data, { query, sort, view, person, place, tag, today, ownerOf: (id) => nameOf(people, id) });
+  // Each tile before the tags only while it would find something.
+  const first = [...(anyStarred ? [{ id: STARRED, name: tr.cabinet.starred }] : []), ...(linked.size > 0 ? [{ id: LINKED, name: tr.documents.linked }] : [])];
+  const tag = [...first, ...tags].some((each) => each.id === filed) ? filed : null;
+  const shown = visible(cabinet.data, { query, sort, view, person, place, tag, linked, today, ownerOf: (id) => nameOf(people, id) });
   // A box of a household the person only reads is never chosen: everything chosen is changed.
   const selection = useSelection(shown.flatMap((product) => product.boxes).filter((box) => writes(box.cabinetId)));
   const chosenIds = () => selection.chosen.map((box) => box.id);
@@ -185,6 +195,9 @@ export default function Cabinet() {
   return (
     <Screen title={header.title} actions={header.actions}>
       <OpenHousehold household={open} />
+      <Card rows>
+        <ListRow icon={FileText} title={tr.documents.title} subtitle={tr.documents.count(documents.length)} chevron onPress={() => router.push("/documents")} />
+      </Card>
       {!holding ? (
         <EmptyState
           icon={BriefcaseMedical}
@@ -230,7 +243,7 @@ export default function Cabinet() {
           </View>
           <Filter table="people" named={people} chosen={person} onChoose={setWhose} />
           <Filter table="locations" named={locations} chosen={place} onChoose={setWhere} />
-          <Filter table="tags" named={tags} first={anyStarred ? [{ id: STARRED, name: tr.cabinet.starred }] : []} chosen={tag} onChoose={setFiled} />
+          <Filter table="tags" named={tags} first={first} chosen={tag} onChoose={setFiled} />
           {shown.length === 0 ? <Body muted>{query.trim() ? tr.cabinet.noMatch(query.trim()) : tr.cabinet.noFiltered}</Body> : null}
           {shown.map((product) => (
             <Card key={product.id} rows>

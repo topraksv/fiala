@@ -51,10 +51,12 @@ describe("the privacy notice", () => {
     expect(tr.legal.signUpNotice).toMatch(/hesap oluşturduğunda/i);
   });
 
-  it("asks for health data apart from the notice, before the first box is written, and says how to take it back", () => {
-    const addBox = read("src/app/add-box.tsx");
-    expect(addBox.indexOf("hasHealthConsent(")).toBeGreaterThan(-1);
-    expect(addBox.indexOf("giveHealthConsent()")).toBeLessThan(addBox.indexOf("await addPackage("));
+  it("asks for health data apart from the notice, before the first box or document is written, and says how to take it back", () => {
+    for (const [file, write] of [["src/app/add-box.tsx", "await addPackage("], ["src/app/add-document.tsx", "await addDocument("]]) {
+      const form = read(file!);
+      expect(form.indexOf("hasHealthConsent(")).toBeGreaterThan(-1);
+      expect(form.indexOf("giveHealthConsent()")).toBeLessThan(form.indexOf(write!));
+    }
     expect(tr.legal.purposes.find((purpose) => /sağlık verisi/.test(purpose))).toMatch(/KVKK m\. 6/);
     expect(tr.legal.selfService.join(" ")).toMatch(/rızayı geri almak[\s\S]*Verileri Sıfırla → Dolap/);
     expect(tr.addBox.consentBody).toMatch(/Verileri Sıfırla → Dolap/);

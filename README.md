@@ -8,7 +8,7 @@
 home, whose they are, their expiry and stock. iOS, Android and the web from one
 codebase.*
 
-[![Expo SDK 57](https://img.shields.io/badge/Expo-SDK%2057-0F0F0D?logo=expo&logoColor=white)](https://docs.expo.dev/versions/v57.0.0/)
+[![Expo SDK 58](https://img.shields.io/badge/Expo-SDK%2058-0F0F0D?logo=expo&logoColor=white)](https://docs.expo.dev/versions/v58.0.0/)
 [![Node 22](https://img.shields.io/badge/Node-22-0F0F0D?logo=nodedotjs&logoColor=5FA04E)](#geliştirici-kurulumu)
 [![Proprietary](https://img.shields.io/badge/license-proprietary-A55335)](LICENSE)
 
@@ -35,7 +35,7 @@ dolap sırayla geliyor.
 
 ## Geliştirici kurulumu
 
-> **Node 22 zorunlu** (`.nvmrc`) — Expo SDK 57'nin derleyip test ettiği sürüm.
+> **Node 22 zorunlu** (`.nvmrc`) — Expo SDK 58'in derleyip test ettiği sürüm.
 
 ```bash
 git clone https://github.com/topraksv/fiala.git

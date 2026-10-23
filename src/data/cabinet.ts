@@ -171,19 +171,12 @@ export async function moveBox(packageId: string, cabinetId: string): Promise<{ i
     const product = (await findRow("products", String(box.product_id)))!;
     const sqlite = await getSqliteAsync();
     const { id: productId, writes } = await productThere(cabinetId, product);
-    const sameName = async (table: NamedTable, id: unknown) => {
-      const named = await readNamed(table);
-      const from = named.find((each) => each.id === id);
-      if (!from) return null;
-      const there = named.find((each) => each.cabinetId === cabinetId && foldName(each.name) === foldName(from.name));
-      if (there) return there.id;
-      const made = uuidv7();
-      writes.push({ table, row: { id: made, cabinetId, name: from.name } });
-      return made;
-    };
     const { tombstoneVersion: _, ...shape } = fromDbShape("packages", box);
     // An open ask to check it was made of the household it leaves.
-    writes.push({ table: "packages", row: { ...shape, id, cabinetId, productId, personId: await sameName("people", box.person_id), locationId: await sameName("locations", box.location_id), checkOf: null, checkAskedAt: null } });
+    writes.push({
+      table: "packages",
+      row: { ...shape, id, cabinetId, productId, personId: await nameThere("people", box.person_id, cabinetId, writes), locationId: await nameThere("locations", box.location_id, cabinetId, writes), checkOf: null, checkAskedAt: null },
+    });
     const household = await sqlite.getFirstAsync<{ id: string }>("SELECT id FROM cabinets WHERE id = ? AND id <> owner_id", [cabinetId]);
     if (household) {
       const held = await sqlite.getFirstAsync<{ total: number }>("SELECT COALESCE(SUM(quantity_milli), 0) AS total FROM package_moves WHERE package_id = ? AND deleted_at IS NULL", [packageId]);
@@ -197,10 +190,49 @@ export async function moveBox(packageId: string, cabinetId: string): Promise<{ i
         }
       }
     }
+    writes.push(...(await relinked("package_id", packageId, id)));
+    // A plan taking its doses from the box takes them from it where it went.
+    for (const plan of await sqlite.getAllAsync<Record<string, unknown>>("SELECT * FROM dose_plans WHERE package_id = ? AND deleted_at IS NULL", [packageId])) {
+      writes.push(...editRow("dose_plans", plan, { packageId: id }));
+    }
     writes.push({ table: "packages", row: { ...shape, deletedAt: nowIso() } });
     return writes;
   });
   return written.writes.length > 0 ? { id, written } : null;
+}
+
+/**
+ * The person or place of the same name in another cabinet, made there when
+ * there is none, as an import does; `null` for none.
+ */
+export async function nameThere(table: NamedTable, id: unknown, cabinetId: string, writes: RowWrite[]): Promise<string | null> {
+  const named = await readNamed(table);
+  const from = named.find((each) => each.id === id);
+  if (!from) return null;
+  const there = named.find((each) => each.cabinetId === cabinetId && foldName(each.name) === foldName(from.name));
+  if (there) return there.id;
+  const made = uuidv7();
+  writes.push({ table, row: { id: made, cabinetId, name: from.name } });
+  return made;
+}
+
+/**
+ * A document's links to a box or a document that moved (F3.4): each taken
+ * off the old id and put on the new, in the document's cabinet, so a moved
+ * box keeps its prescription and a moved prescription its boxes.
+ */
+export async function relinked(column: "document_id" | "package_id", from: string, to: string, cabinetId?: string): Promise<RowWrite[]> {
+  const sqlite = await getSqliteAsync();
+  const writes: RowWrite[] = [];
+  for (const link of await sqlite.getAllAsync<Record<string, unknown>>(`SELECT * FROM document_links WHERE ${column} = ? AND deleted_at IS NULL`, [from])) {
+    const { tombstoneVersion: _, ...shape } = fromDbShape("document_links", link);
+    const moved = { ...shape, [column === "document_id" ? "documentId" : "packageId"]: to, cabinetId: cabinetId ?? shape.cabinetId };
+    // The pair's id, so linking it again later is this row; the new side is a new id, so no row has it yet.
+    const id = await deterministicId(naturalKeys.documentLink(String(moved.documentId), String(moved.packageId ?? moved.productId)));
+    writes.push({ table: "document_links", row: { ...moved, id } });
+    writes.push({ table: "document_links", row: { ...shape, deletedAt: nowIso() } });
+  }
+  return writes;
 }
 
 function moveWrite(cabinetId: string, packageId: string, quantityMilli: number, reason: MoveReason): RowWrite {
@@ -428,7 +460,7 @@ export async function readActivity(cabinetId: string, limit = 30): Promise<Activ
      ORDER BY at DESC, id DESC LIMIT ?`,
     [cabinetId, cabinetId, limit],
   );
-  return rows.map((row) => ({ ...row, changes: row.changes == null ? null : (JSON.parse(row.changes) as BoxChange["changes"]) }));
+  return rows.map((row) => ({ ...row, changes: JSON.parse(row.changes ?? "null") as BoxChange["changes"] | null }));
 }
 
 /** A person's, a product's, a box's or a household's photo, or with `null` taken off; a box records it in its history. */
@@ -447,7 +479,7 @@ export async function setPhoto(table: "people" | "products" | "packages" | "cabi
  * them out. Written as "not in a deleted one", since the person's own cabinet
  * reaches a device only with its first pull.
  */
-const inLiveCabinet = (column: string) => `${column} NOT IN (SELECT id FROM cabinets WHERE deleted_at IS NOT NULL)`;
+export const inLiveCabinet = (column: string) => `${column} NOT IN (SELECT id FROM cabinets WHERE deleted_at IS NOT NULL)`;
 
 /** Every product with a box in it or still to be bought, by name, each box soonest to expire first. */
 export async function readCabinet(): Promise<CabinetProduct[]> {

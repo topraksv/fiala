@@ -147,6 +147,7 @@ export const productTags = sqliteTable(
 
 /** What a box is counted in; a count of each, so none converts into another. */
 export const PACKAGE_UNITS = ["adet", "tablet", "kapsul", "ml", "doz", "tup"] as const;
+export type PackageUnit = (typeof PACKAGE_UNITS)[number];
 
 /** Why a box left the cabinet while its record stays; none is a box still at home. */
 export const PACKAGE_DISPOSITIONS = ["lost", "disposed", "archived"] as const;
@@ -223,6 +224,119 @@ export const packageChanges = sqliteTable(
   (t) => [index("idx_package_changes_package_id").on(t.packageId)],
 );
 
+/** What a document is; `docs/TASKS.md` F3.3. */
+export const DOCUMENT_KINDS = ["prescription", "lab", "discharge", "doctor_note", "other"] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+/** The files a document may be; the app draws one by this, never by what Storage says. */
+export const DOCUMENT_FILE_TYPES = ["pdf", "jpeg"] as const;
+export type DocumentFileType = (typeof DOCUMENT_FILE_TYPES)[number];
+
+/**
+ * A prescription, a lab result, a letter (F3.1–F3.5), in a cabinet as a box
+ * is: its own cabinet is "only me", a household's is the household's. Its
+ * file is `file_id` in `document_files` and Storage (`src/sync/documents.ts`).
+ */
+export const documents = sqliteTable("documents", {
+  ...cabinetColumns,
+  /** Whose it is; none is nobody's in particular. */
+  personId: text("person_id"),
+  kind: text("kind", { enum: DOCUMENT_KINDS }).notNull(),
+  title: text("title").notNull(),
+  /** The local day it was written. */
+  issuedOn: text("issued_on"),
+  note: text("note"),
+  /** An e-prescription's code or a paper one's number. */
+  reference: text("reference"),
+  fileId: text("file_id"),
+  fileType: text("file_type", { enum: DOCUMENT_FILE_TYPES }),
+  byteSize: integer("byte_size"),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  /** Who added it, stamped by the server; none until it is pushed, which is this device's own. */
+  createdBy: text("created_by"),
+});
+
+/**
+ * A document naming a product or a box (F3.4), in the document's cabinet,
+ * whichever cabinet the product or box is in. Its id is a hash of the two
+ * (`src/db/ids.ts`); taking it off tombstones it.
+ */
+export const documentLinks = sqliteTable(
+  "document_links",
+  {
+    ...cabinetColumns,
+    documentId: text("document_id").notNull(),
+    productId: text("product_id"),
+    packageId: text("package_id"),
+  },
+  (t) => [index("idx_document_links_document_id").on(t.documentId)],
+);
+
+/**
+ * A medicine taken on a schedule (F3.7), for a person, in a cabinet as a box
+ * is: its times of day on its weekdays, from its first day to its last. When
+ * it names a box, a dose taken comes out of it (F3.8). Its days are local
+ * `YYYY-MM-DD` and its times local `HH:MM`, as the person reads them.
+ */
+export const dosePlans = sqliteTable("dose_plans", {
+  ...cabinetColumns,
+  productId: text("product_id").notNull(),
+  packageId: text("package_id"),
+  personId: text("person_id"),
+  /** One dose, in thousandths of the box's unit, as a move counts it. */
+  amountMilli: integer("amount_milli").notNull(),
+  /** Its times of day as a JSON array, earliest first. */
+  times: text("times").notNull(),
+  /** Its weekdays, Monday 1, Tuesday 2 … Sunday 64; every day is 127. */
+  weekdays: integer("weekdays").notNull(),
+  startsOn: text("starts_on").notNull(),
+  endsOn: text("ends_on"),
+  /** How the prescription says to take it. */
+  instructions: text("instructions"),
+  paused: integer("paused", { mode: "boolean" }).notNull().default(false),
+  /** Who planned it, stamped by the server; none until it is pushed, which is this device's own. */
+  createdBy: text("created_by"),
+});
+
+/** What became of a dose (F3.8); a dose nobody answered is none of these. */
+export const DOSE_STATUSES = ["taken", "skipped", "snoozed", "missed"] as const;
+export type DoseStatus = (typeof DOSE_STATUSES)[number];
+
+/**
+ * The answer to one dose of a plan, in the plan's cabinet. Its id is a hash
+ * of the plan and the dose (`src/db/ids.ts`), so two devices answering it
+ * meet one row and the later answer stands.
+ */
+export const doseLogs = sqliteTable(
+  "dose_logs",
+  {
+    ...cabinetColumns,
+    planId: text("plan_id").notNull(),
+    dueOn: text("due_on").notNull(),
+    dueTime: text("due_time").notNull(),
+    status: text("status", { enum: DOSE_STATUSES }).notNull(),
+    /** When a dose put off is to be said again. */
+    snoozedUntil: text("snoozed_until"),
+    /** The move a dose taken made in the plan's box, taken back when the answer changes. */
+    moveId: text("move_id"),
+    /** Who answered last, stamped by the server at every answer; none until it is pushed, which is this device's own. */
+    answeredBy: text("answered_by"),
+  },
+  (t) => [index("idx_dose_logs_plan_id").on(t.planId)],
+);
+
+/**
+ * Local only: a document's file, base64, as `photos` holds a photo's. Sent
+ * once and fetched only when the document is opened.
+ */
+export const documentFiles = sqliteTable("document_files", {
+  id: text("id").primaryKey(),
+  data: text("data").notNull(),
+  createdAt: text("created_at").notNull(),
+  /** When Storage took it, or when it came from there; `null` is still to send. */
+  uploadedAt: text("uploaded_at"),
+});
+
 /**
  * Local only: a photo's bytes, beside the row that names it by `photo_id`,
  * never in the outbox — they go to Storage (`src/sync/photos.ts`). Gital's:
@@ -291,6 +405,6 @@ export const UNPULLED = "unpulled:";
  * as Gital's: a device only ever narrows one, so what it wrote just before
  * leaving lands before the leaving does.
  */
-export const SYNCED_TABLES = { settings, cabinets, people, locations, products, packages, package_moves: packageMoves, package_changes: packageChanges, tags, product_tags: productTags, cabinet_members: cabinetMembers } as const;
+export const SYNCED_TABLES = { settings, cabinets, people, locations, products, packages, package_moves: packageMoves, package_changes: packageChanges, tags, product_tags: productTags, documents, document_links: documentLinks, dose_plans: dosePlans, dose_logs: doseLogs, cabinet_members: cabinetMembers } as const;
 
 export type SyncedTableName = keyof typeof SYNCED_TABLES;

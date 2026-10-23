@@ -257,6 +257,11 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
             <Stack.Screen name="add-box" />
             <Stack.Screen name="box/[id]" />
             <Stack.Screen name="boxes" />
+            <Stack.Screen name="documents" />
+            <Stack.Screen name="add-document" />
+            <Stack.Screen name="document/[id]" />
+            <Stack.Screen name="doses" />
+            <Stack.Screen name="dose-plan" />
             <Stack.Screen name="import" />
             <Stack.Screen name="product/[id]" />
             <Stack.Screen name="names/[table]" />
@@ -284,7 +289,7 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
         <>
           <SyncRunner userId={userId} />
           <LiveRunner userId={userId} />
-          <ReminderPlanner />
+          <ReminderPlanner userId={userId} />
           {locked || lockedHere ? null : <ReminderTaps />}
         </>
       ) : null}
@@ -336,14 +341,14 @@ function LiveRunner({ userId }: { userId: string }) {
 }
 
 /** At opening and each time the app leaves the screen, when what it holds may have changed. Gital's. */
-function ReminderPlanner() {
+function ReminderPlanner({ userId }: { userId: string | null }) {
   useEffect(() => {
     if (!remindersAvailable) return;
-    const plan = () => void replanReminders().catch(() => {});
+    const plan = () => void replanReminders(userId).catch(() => {});
     plan();
     const subscription = AppState.addEventListener("change", (state) => state === "background" && plan());
     return () => subscription.remove();
-  }, []);
+  }, [userId]);
   return null;
 }
 

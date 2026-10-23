@@ -24,4 +24,10 @@ export const naturalKeys = {
   product: (cabinetId: string, gtin: string) => `product:${cabinetId}:${gtin}`,
   /** One row per tag on a product, so tagging it twice, on two devices, is one tag. */
   productTag: (productId: string, tagId: string) => `product-tag:${productId}:${tagId}`,
+  /** One row per product or box a document names, as a tag on a product. */
+  documentLink: (documentId: string, targetId: string) => `document-link:${documentId}:${targetId}`,
+  /** One answer per dose of a plan, so two devices answering it meet one row. */
+  doseLog: (planId: string, dueOn: string, dueTime: string) => `dose-log:${planId}:${dueOn}:${dueTime}`,
+  /** One move per dose and box, so two devices saying it was taken take it once. */
+  doseMove: (planId: string, dueOn: string, dueTime: string, packageId: string) => `dose-move:${planId}:${dueOn}:${dueTime}:${packageId}`,
 };

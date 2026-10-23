@@ -706,5 +706,8 @@ export const personColors = {
   dark: { red: "#F97066", orange: "#FD853A", yellow: "#FAC515", green: "#47CD89", teal: "#22CCEE", blue: "#84ADFF", purple: "#B692F6", pink: "#F670C7" },
 } as const;
 
+/** The first-open tour's drawings (Gital's): the frame, the text's height, a skeleton line, a row's block, a mark, the step dots. */
+export const tour = { art: 122, text: 66, line: 5, block: 20, mark: 30, dot: { width: 6, active: 18 } } as const;
+
 /** A person's mark: a disc with their photo or their initial on their colour. */
 export const personMark = { size: 32, large: 72 } as const;

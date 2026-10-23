@@ -6,13 +6,13 @@
  * read. Gital's suite, on Fiala's boxes.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls = vi.hoisted(() => [] as string[]);
 const payloads = vi.hoisted(() => [] as unknown[]);
 const moments = vi.hoisted(() => [] as Date[]);
 const taps = vi.hoisted(() => ({ last: null as unknown, cleared: 0, listener: null as ((response: unknown) => void) | null, removed: 0 }));
-const phone = vi.hoisted(() => ({ handler: null as { handleNotification: () => Promise<unknown> } | null, os: "android", granted: true, ios: 0 as number | null, stored: new Map<string, string>(), readFails: false, boxes: [] as Record<string, unknown>[] }));
+const phone = vi.hoisted(() => ({ handler: null as { handleNotification: () => Promise<unknown> } | null, os: "android", granted: true, ios: 0 as number | null, stored: new Map<string, string>(), readFails: false, boxes: [] as Record<string, unknown>[], plans: [] as Record<string, unknown>[], answers: [] as Record<string, unknown>[] }));
 
 vi.mock("react-native", () => ({ Platform: { get OS() { return phone.os; } } }));
 vi.mock("expo-notifications", () => ({
@@ -53,9 +53,15 @@ vi.mock("../../src/data/cabinet", () => ({
   },
 }));
 
+vi.mock("../../src/data/doses", () => ({
+  readDosePlans: async () => phone.plans,
+  readDoseAnswers: async (from: string, to: string) => phone.answers.filter((answer) => String(answer.dueOn) >= from && String(answer.dueOn) <= to),
+}));
+
 const { cancelReminders, disableReminders, enableReminders, followReminderTaps, remindersAvailable, replanReminders } = await import("../../src/services/reminders.native");
-const { REMINDER_DEFAULTS, readNoticesSeenAt, readReminderPreferences, saveNoticesSeenAt, saveReminderHour, saveReminderMuted, saveReminderNames } = await import("../../src/services/reminder-preferences");
+const { REMINDER_DEFAULTS, readDoseRinging, readNoticesSeenAt, readReminderPreferences, saveDoseRinging, saveNoticesSeenAt, saveReminderHour, saveReminderMuted, saveReminderNames } = await import("../../src/services/reminder-preferences");
 const { localDay } = await import("../../src/domain/boxes");
+const { shiftDay } = await import("../../src/domain/doses");
 
 const inDays = (days: number) => {
   const day = new Date();
@@ -76,6 +82,7 @@ const box = (fields: Record<string, unknown> = {}) => ({
   movedAt: null,
   ...fields,
 });
+const ME = "11111111-1111-4111-8111-111111111111";
 const EXPIRED = "date fiala-reminders: Son kullanma tarihi doldu — ";
 const CHANNEL = ["channel fiala-reminders", "Hatırlatmalar 3"];
 
@@ -83,24 +90,24 @@ beforeEach(() => {
   calls.length = 0;
   payloads.length = 0;
   moments.length = 0;
-  Object.assign(phone, { os: "android", granted: true, ios: 0, readFails: false, boxes: [box()] });
+  Object.assign(phone, { os: "android", granted: true, ios: 0, readFails: false, boxes: [box()], plans: [], answers: [] });
   phone.stored.clear();
 });
 
 describe("reminders on the phone", () => {
   it("schedule nothing, and clear what was, while switched off", async () => {
-    await replanReminders();
+    await replanReminders(ME);
     expect(calls).toEqual(["cancel"]);
   });
 
   it("ask once switched on, then schedule the plan without a medicine's name", async () => {
     phone.granted = false;
-    expect(await enableReminders()).toBe(false);
+    expect(await enableReminders(ME)).toBe(false);
     expect(calls).toEqual([...CHANNEL, "ask", "cancel"]);
     expect(phone.stored.get("fiala.reminders.on")).toBe("false");
     calls.length = 0;
     phone.granted = true;
-    expect(await enableReminders()).toBe(true);
+    expect(await enableReminders(ME)).toBe(true);
     expect(calls.slice(0, 6)).toEqual([...CHANNEL, ...CHANNEL, "cancel", `${EXPIRED}Bir kutunun son kullanma tarihi doldu; elden çıkarmayı düşün.`]);
     expect(payloads[0]).toEqual({ fialaTarget: { kind: "cabinet" } });
   });
@@ -108,45 +115,45 @@ describe("reminders on the phone", () => {
   it("name the box, and open it, once names are allowed", async () => {
     await saveReminderNames(true);
     phone.boxes = [box(), box({ id: "0199d000-0001-7000-8000-000000000000", nickname: "Çocuğun şurubu" })];
-    await enableReminders();
+    await enableReminders(ME);
     expect(calls).toContain(`${EXPIRED}Parol · 500 mg kutusunun son kullanma tarihi doldu; elden çıkarmayı düşün.`);
     expect(calls).toContain(`${EXPIRED}Çocuğun şurubu kutusunun son kullanma tarihi doldu; elden çıkarmayı düşün.`);
     expect(payloads[0]).toEqual({ fialaTarget: { kind: "box", id: "0199d000-0000-7000-8000-000000000000" } });
   });
 
   it("keep yesterday's reminders when the plan cannot be read", async () => {
-    await enableReminders();
+    await enableReminders(ME);
     calls.length = 0;
     phone.readFails = true;
-    await expect(replanReminders()).rejects.toThrow("SQLITE_BUSY");
+    await expect(replanReminders(ME)).rejects.toThrow("SQLITE_BUSY");
     expect(calls).toEqual(CHANNEL);
     phone.readFails = false;
-    await replanReminders();
+    await replanReminders(ME);
     expect(calls.slice(2, 5)).toEqual([...CHANNEL, "cancel"]);
   });
 
   it("clear everything when switched off, or when the phone took the permission back", async () => {
-    await enableReminders();
+    await enableReminders(ME);
     calls.length = 0;
     await disableReminders();
     expect(calls).toEqual(["cancel"]);
-    await replanReminders();
+    await replanReminders(ME);
     expect(calls).toEqual(["cancel", "cancel"]);
 
-    await enableReminders();
+    await enableReminders(ME);
     calls.length = 0;
     phone.granted = false;
-    await replanReminders();
+    await replanReminders(ME);
     expect(calls).toEqual(["cancel"]);
   });
 
   it("clear everything at a sign-out, and keep the switch for the next account", async () => {
-    await enableReminders();
+    await enableReminders(ME);
     calls.length = 0;
     await cancelReminders();
     expect(calls).toEqual(["cancel"]);
     calls.length = 0;
-    await replanReminders();
+    await replanReminders(ME);
     expect(calls[2]).toBe("cancel");
     expect(calls.length).toBeGreaterThan(3);
   });
@@ -157,14 +164,14 @@ describe("reminders on the phone", () => {
     for (const status of [2, 3, 4]) {
       phone.ios = status;
       calls.length = 0;
-      expect(await enableReminders(), String(status)).toBe(true);
+      expect(await enableReminders(ME), String(status)).toBe(true);
       expect(calls.slice(0, 2)).toEqual(["cancel", "date: Son kullanma tarihi doldu — Bir kutunun son kullanma tarihi doldu; elden çıkarmayı düşün."]);
     }
     for (const status of [1, null]) {
       phone.ios = status;
       phone.granted = true;
       calls.length = 0;
-      expect(await enableReminders(), String(status)).toBe(false);
+      expect(await enableReminders(ME), String(status)).toBe(false);
       expect(calls).toEqual(["ask", "cancel"]);
     }
   });
@@ -195,13 +202,69 @@ describe("what the person chose", () => {
   it("plans at the hour chosen and leaves out what was silenced", async () => {
     await saveReminderHour(21);
     await saveReminderMuted(["check"]);
-    await enableReminders();
+    await enableReminders(ME);
     expect(calls.filter((call) => call.startsWith("date"))).toEqual([`${EXPIRED}Bir kutunun son kullanma tarihi doldu; elden çıkarmayı düşün.`]);
     expect(moments.map((at) => [localDay(at), at.getHours()])).toEqual([[inDays(4), 21]]);
     await saveReminderMuted(["expiry", "check"]);
     calls.length = 0;
-    await replanReminders();
+    await replanReminders(ME);
     expect(calls.filter((call) => call.startsWith("date"))).toEqual([]);
+  });
+});
+
+describe("doses", () => {
+  // Noon, so ten minutes on is still today.
+  beforeEach(() => void vi.useFakeTimers({ now: new Date(2026, 9, 20, 12), toFake: ["Date"] }));
+  afterEach(() => void vi.useRealTimers());
+  const DOSE = "date fiala-reminders: İlaç saati — ";
+  const time = (minutes: number) => {
+    const at = new Date(Date.now() + minutes * 60_000);
+    return [localDay(at), `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`] as const;
+  };
+  const plan = (id: string, name: string, createdBy: string | null, dueTime: string) => ({ id, name, createdBy, times: JSON.stringify([dueTime]), weekdays: 127, startsOn: "2026-01-01", endsOn: null, paused: false });
+
+  it("are said for the plans made here or by this person, at their time, opening the day's doses, and not once answered", async () => {
+    phone.boxes = [];
+    const [today, soon] = time(10);
+    phone.plans = [plan("p1", "Coraspin", ME, soon), plan("p2", "Ventolin", null, soon), plan("p3", "Parol", "22222222-2222-4222-8222-222222222222", soon)];
+    phone.answers = [{ planId: "p2", dueOn: today, dueTime: soon, status: "taken", snoozedUntil: null }];
+    await saveReminderNames(true);
+    await enableReminders(ME);
+    const said = calls.filter((call) => call.startsWith(DOSE));
+    expect(said[0]).toBe(`${DOSE}Coraspin alma saati geldi.`);
+    expect(said.filter((call) => !call.includes("Coraspin")), "Ventolin taken today rings from tomorrow; Parol is another's").toEqual(Array(7).fill(`${DOSE}Ventolin alma saati geldi.`));
+    expect(said).toHaveLength(15);
+    expect(payloads[0]).toEqual({ fialaTarget: { kind: "doses" } });
+    expect(moments[0]!.getTime() - Date.now()).toBeGreaterThan(8 * 60_000);
+  });
+
+  it("say a dose of yesterday's put off until now, past midnight", async () => {
+    phone.boxes = [];
+    const [today] = time(0);
+    phone.plans = [plan("p1", "Coraspin", ME, "23:50")];
+    phone.answers = [{ planId: "p1", dueOn: shiftDay(today, -1), dueTime: "23:50", status: "snoozed", snoozedUntil: new Date(Date.now() + 5 * 60_000).toISOString() }];
+    await enableReminders(ME);
+    expect(moments[0]!.getTime() - Date.now(), "yesterday's, put off, comes before today's 23:50").toBe(5 * 60_000);
+  });
+
+  it("follow the phone the person chose for each plan, and go unnamed or silenced as the rest", async () => {
+    phone.boxes = [];
+    const [, soon] = time(10);
+    phone.plans = [plan("p1", "Coraspin", ME, soon), plan("p3", "Parol", "22222222-2222-4222-8222-222222222222", soon)];
+    await saveDoseRinging("p1", false);
+    await saveDoseRinging("p3", true);
+    expect(await readDoseRinging()).toEqual({ p1: false, p3: true });
+    await enableReminders(ME);
+    expect(calls.filter((call) => call.startsWith(DOSE)).slice(0, 1)).toEqual([`${DOSE}Bir ilacın alma saati geldi.`]);
+    expect(calls.filter((call) => call.startsWith(DOSE))).toHaveLength(8);
+    await saveReminderMuted(["dose"]);
+    calls.length = 0;
+    await replanReminders(ME);
+    expect(calls.filter((call) => call.startsWith(DOSE))).toEqual([]);
+    for (const stored of ["[true]", "{", "null", '"on"', '{"p1":"yes","p3":true}']) {
+      phone.stored.set("fiala.reminders.doses", stored);
+      expect(await readDoseRinging(), stored).toEqual(stored.startsWith('{"') ? { p3: true } : {});
+    }
   });
 });
 
@@ -255,9 +318,9 @@ describe("on the web", () => {
   it("has no reminders: switching on is refused and nothing is scheduled", async () => {
     const web = await import("../../src/services/reminders");
     expect(web.remindersAvailable).toBe(false);
-    await expect(web.enableReminders()).resolves.toBe(false);
+    await expect(web.enableReminders(ME)).resolves.toBe(false);
     await expect(web.disableReminders()).resolves.toBeUndefined();
-    await expect(web.replanReminders()).resolves.toBeUndefined();
+    await expect(web.replanReminders(ME)).resolves.toBeUndefined();
     await expect(web.cancelReminders()).resolves.toBeUndefined();
     const open = vi.fn();
     const stop = web.followReminderTaps(open);

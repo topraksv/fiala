@@ -14,14 +14,6 @@ const ACKNOWLEDGED = [
     expectedPaths: ["expo", "expo-updates"],
     reason: "No patched release (RSA PKCS#1 v1.5 signature verification). Carried only by Node tooling: @expo/cli, and @expo/code-signing-certificates, which expo-updates uses for code signing that app.json does not configure. Absent from the web export.",
   },
-  {
-    id: "GHSA-vfj7-8cjw-p6xm",
-    package: "braces",
-    checkedOn: "2026-10-04",
-    recheckAfter: "2026-12-01",
-    expectedPaths: ["expo", "react-native", "react-native-reanimated", "react-native-worklets"],
-    reason: "No patched release (stack exhaustion on a deeply nested pattern). Every path ends in a Metro file map through micromatch, expanding the bundler config's own globs on the developer machine and in CI; absent from the web export.",
-  },
 ];
 
 // Dependencies installed outside the npm registry, which `npm audit` and Dependabot cannot see; `reviewed` is what was read and found not to apply.

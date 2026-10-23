@@ -31,19 +31,20 @@ const unavailable = new Set<string>();
 /** Photos Storage refused for good, not offered again until the next launch. */
 const refused = new Set<string>();
 
-function bytesOf(dataUri: string): Uint8Array {
+/** A data URI's bytes, or bare base64's. */
+export function bytesOf(dataUri: string): Uint8Array {
   const binary = atob(dataUri.slice(dataUri.indexOf(",") + 1));
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
-function base64Of(bytes: Uint8Array): string {
+export function base64Of(bytes: Uint8Array): string {
   let binary = "";
   for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
   return btoa(binary);
 }
 
 /** React Native's Blob has no `arrayBuffer`; its FileReader does the same work natively. */
-function base64OfBlob(blob: Blob): Promise<string> {
+export function base64OfBlob(blob: Blob): Promise<string> {
   if (typeof blob.arrayBuffer === "function") return blob.arrayBuffer().then((buffer) => base64Of(new Uint8Array(buffer)));
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -61,7 +62,7 @@ function jpegDataUri(base64: string): string | null {
   return base64.startsWith("/9j/") ? `data:image/jpeg;base64,${base64}` : null;
 }
 
-function checkActive(signal: AbortSignal): void {
+export function checkActive(signal: AbortSignal): void {
   if (signal.aborted) throw new SessionEpochCancelledError();
 }
 

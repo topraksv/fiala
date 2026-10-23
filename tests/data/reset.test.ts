@@ -58,11 +58,11 @@ describe("resetting the data", () => {
 
   it("holds the consent only at its version, and never from a value it cannot read", async () => {
     expect(hasHealthConsent([])).toBe(false);
-    expect(hasHealthConsent([{ key: HEALTH_CONSENT, value: '{"version":2,"at":"x"}' }])).toBe(true);
+    expect(hasHealthConsent([{ key: HEALTH_CONSENT, value: '{"version":3,"at":"x"}' }])).toBe(true);
     // 1 was given before a household's members could read the boxes.
-    for (const value of ['{"version":1}', '{"version":3}', "{", "null", "1"]) expect(hasHealthConsent([{ key: HEALTH_CONSENT, value }]), value).toBe(false);
-    expect(hasHealthConsent([{ key: "other", value: '{"version":2}' }])).toBe(false);
-    expect(hasHealthConsent([{ key: "account_frozen", value: "true" }, { key: HEALTH_CONSENT, value: '{"version":2}' }]), "found among the others").toBe(true);
+    for (const value of ['{"version":1}', '{"version":2}', '{"version":4}', "{", "null", "1"]) expect(hasHealthConsent([{ key: HEALTH_CONSENT, value }]), value).toBe(false);
+    expect(hasHealthConsent([{ key: "other", value: '{"version":3}' }])).toBe(false);
+    expect(hasHealthConsent([{ key: "account_frozen", value: "true" }, { key: HEALTH_CONSENT, value: '{"version":3}' }]), "found among the others").toBe(true);
     // The stored key: renamed, every consent already given is forgotten.
     expect(HEALTH_CONSENT).toBe("health_consent");
     expect([isFrozen([{ key: HEALTH_CONSENT, value: "true" }]), isFrozen([{ key: "account_frozen", value: "false" }])], "no other setting freezes").toEqual([false, false]);

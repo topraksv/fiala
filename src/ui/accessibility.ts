@@ -1,9 +1,9 @@
 /** Focus behavior for modal surfaces. */
 
 import { useEffect, useRef, type RefObject } from "react";
-import { AccessibilityInfo, findNodeHandle, Platform, type View } from "react-native";
+import { AccessibilityInfo, findNodeHandle, Platform, type ViewInstance } from "react-native";
 
-function moveAccessibilityFocus(target: View | null): void {
+function moveAccessibilityFocus(target: ViewInstance | null): void {
   if (!target) return;
   if (Platform.OS === "web") {
     (target as unknown as { focus?: () => void }).focus?.();
@@ -30,8 +30,8 @@ function focusableElements(container: HTMLElement): HTMLElement[] {
  * web, and gives focus back to what had it when it closes. `focusHeading` is
  * false for a prompt, whose field takes focus itself.
  */
-export function useModalAccessibility(open: boolean, focusKey?: unknown, focusHeading = true): RefObject<View | null> {
-  const titleRef = useRef<View>(null);
+export function useModalAccessibility(open: boolean, focusKey?: unknown, focusHeading = true): RefObject<ViewInstance | null> {
+  const titleRef = useRef<ViewInstance>(null);
 
   useEffect(() => {
     if (!open) return;

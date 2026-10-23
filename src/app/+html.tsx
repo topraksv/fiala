@@ -1,4 +1,4 @@
-import { ScrollViewStyleReset } from "expo-router/html";
+import { ScrollViewStyleReset, useServerDocumentContext } from "expo-router/html";
 import type { PropsWithChildren } from "react";
 
 import { contentSecurityPolicy } from "../domain/web-security";
@@ -35,8 +35,12 @@ const SITE_URL = "https://topraksv.github.io/fiala/";
 /** One static document for every visitor: the script paints the stored ground before the bundle
  *  loads. `viewport-fit=cover` gives iOS Safari real safe-area insets. */
 export default function Root({ children }: PropsWithChildren) {
+  // From SDK 58 the export renders this document through React and hands the
+  // bundle's scripts and react-native-web's styles to it here; a root that
+  // drops them exports a page that never boots.
+  const { htmlAttributes, bodyAttributes, headNodes, bodyNodes } = useServerDocumentContext();
   return (
-    <html lang="tr">
+    <html lang="tr" {...htmlAttributes}>
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
@@ -67,8 +71,12 @@ export default function Root({ children }: PropsWithChildren) {
         <style dangerouslySetInnerHTML={{ __html: focusRingCss(light.focus) }} />
         <script dangerouslySetInnerHTML={{ __html: PAINT_GROUND }} />
         <script dangerouslySetInnerHTML={{ __html: REGISTER_WORKER }} />
+        {headNodes}
       </head>
-      <body>{children}</body>
+      <body {...bodyAttributes}>
+        {children}
+        {bodyNodes}
+      </body>
     </html>
   );
 }

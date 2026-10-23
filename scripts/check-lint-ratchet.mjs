@@ -1,8 +1,9 @@
 // Fails when a lint rule fires more often than lint-baseline.json records; errors fail outright.
 // Per rule, not per file: a file-level baseline would be rewritten whenever a file moved. `--record` adopts the counts by hand.
-// Shells out to `expo lint` cold: a warm .eslintcache reports nothing for unchanged files, so the ratchet would fall to whatever was cached.
+// Shells out to `expo lint --no-cache`: a warm cache reports nothing for unchanged files, so the ratchet would fall to whatever was cached.
+// SDK 58 moved that cache to `.expo/cache/eslint/`, so deleting `.eslintcache` left it warm and four errors passed locally.
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const BASELINE = "lint-baseline.json";
 
@@ -64,9 +65,8 @@ function readBaseline() {
 
 function runLint() {
   // `expo lint` exits non-zero on a real error; the report is still read.
-  rmSync(".eslintcache", { force: true });
   try {
-    return execFileSync("npx", ["expo", "lint", "--", "--format", "json"], {
+    return execFileSync("npx", ["expo", "lint", "--no-cache", "--", "--format", "json"], {
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -86,7 +86,7 @@ if (import.meta.main) {
   const baseline = stored ?? { rules: {} };
   const { problems, improvements } = evaluate(rules, baseline);
 
-  // Printed before any decision: `runLint` deleted .eslintcache, so a run that prints nothing costs a second cold lint.
+  // Printed before any decision: every run is cold, so a run that prints nothing costs a second cold lint.
   for (const rule of Object.keys({ ...baseline.rules, ...rules }).sort()) {
     const now = rules[rule] ?? 0;
     const was = baseline.rules?.[rule];

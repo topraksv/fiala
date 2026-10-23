@@ -1,7 +1,8 @@
 /**
  * One medicine as the cabinet knows it (`docs/TASKS.md` F1.19): its fields,
  * note and photo, its star and tags (F1.17), whether it is on the list to buy
- * (F1.23), what is left across its boxes and for whom, and each box apart.
+ * (F1.23), what is left across its boxes and for whom, each box apart, and
+ * its dose plans (F3.7).
  * A change here is the product's; a box keeps its own days and amount.
  */
 
@@ -20,6 +21,8 @@ import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
 import { Button, Card, IconButton, ListRow, Notice, Screen, SectionHeader, ToggleRow } from "../../ui/components";
 import { appError, appPrompt } from "../../ui/dialog";
+import { LinkedDocuments } from "../../ui/documents";
+import { ProductPlans } from "../../ui/doses";
 import { PersonMark, ViewOnly } from "../../ui/named-choices";
 import { PhotoField } from "../../ui/photo-field";
 import { spacing } from "../../ui/theme";
@@ -147,6 +150,9 @@ export default function ProductScreen() {
           <Button label={tr.product.addBox} icon={Plus} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { product: product.id } })} />
         </View>
       ) : null}
+
+      <ProductPlans productId={product.id} editable={editable} />
+      <LinkedDocuments target={{ product: product.id }} editable={editable} />
 
       {editable ? (
         <>

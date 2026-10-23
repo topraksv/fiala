@@ -19,13 +19,14 @@ type Failure = { message: string; code?: string; status?: number };
 type Reply = { data: unknown; error: Failure | null };
 type Filter = { after?: { us: number; id: string }; from?: number; limit: number; eq: Record<string, string> };
 
-const TABLES = ["settings", "cabinets", "people", "locations", "products", "packages", "package_moves", "package_changes", "tags", "product_tags", "cabinet_members"];
+const TABLES = ["settings", "cabinets", "people", "locations", "products", "packages", "package_moves", "package_changes", "tags", "product_tags", "documents", "document_links", "dose_plans", "dose_logs", "cabinet_members"];
 /** Keyed by their id alone (migration 4). */
 const ID_KEYED = new Set(["cabinets", "cabinet_members"]);
 /** The column a table's rows are keyed by besides their id; none for a cabinet or a membership. */
 const scopeOf = (table: string) => (ID_KEYED.has(table) ? null : table === "settings" ? "user_id" : "cabinet_id");
 const PHOTO_TABLES = ["people", "products", "packages"];
 const PHOTO_OBJECT = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(full|thumb)\.jpg$/;
+const DOCUMENT_OBJECT = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file\.(pdf|jpg)$/;
 /** The server takes a setting's JSON of 10,000 characters at most. */
 const VALUE_MAX = 10_000;
 
@@ -53,9 +54,13 @@ const SHARING_ARGS: Record<string, string[]> = {
   answer_cabinet_offer: ["cabinet", "accept", "member_name"],
 };
 
+const WRITER_STAMPED = new Set(["package_moves", "package_changes", "documents", "dose_plans"]);
+
 export class FakeCloud {
   readonly tables = new Map<string, Map<string, Row>>(TABLES.map((table) => [table, new Map()]));
   readonly objects = new Map<string, { owner: string; bytes: Uint8Array; at: number }>();
+  /** The `documents` bucket's, apart, so a test reads each bucket alone. */
+  readonly documentObjects = new Map<string, { owner: string; bytes: Uint8Array; at: number }>();
   /** Links by their token, offers by `cabinet|person`; no client reads either table. */
   private readonly invites = new Map<string, { cabinet: string; role: string; by: string }>();
   private readonly offers = new Map<string, { cabinet: string; role: string; by: string; to: string }>();
@@ -212,6 +217,10 @@ export class FakeCloud {
         return { data: null, error: { message: "invalid tombstone generation", code: "23514" } };
       }
       if (!kept) {
+        // `stamp_writer` (migrations 11, 14, 15): the inserter, kept on every update.
+        if (WRITER_STAMPED.has(table)) next.created_by = old ? old.created_by : uid;
+        // `stamp_answerer` (migration 15): whoever answered last.
+        if (table === "dose_logs") next.answered_by = uid;
         next.updated_at = timestamptz(now);
         for (const column of ["created_at", "deleted_at"]) {
           if (typeof next[column] === "string") next[column] = timestamptz(micros(String(next[column])));
@@ -368,6 +377,16 @@ export class FakeCloud {
       const month = Date.now() - 30 * 86_400_000;
       return { data: [...this.objects].filter(([path, object]) => object.owner === uid && object.at < month && !named(PHOTO_OBJECT.exec(path)![1]!)).map(([path]) => path), error: null };
     }
+    if (name === "unnamed_documents") {
+      const month = Date.now() - 30 * 86_400_000;
+      return {
+        data: [...this.documentObjects].filter(([path, object]) => object.owner === uid && object.at < month && !this.rows("documents").some((row) => row.file_id === DOCUMENT_OBJECT.exec(path)![1] && row.deleted_at == null)).map(([path]) => path),
+        error: null,
+      };
+    }
+    if (name === "own_document_objects") {
+      return { data: [...this.documentObjects].filter(([, object]) => object.owner === uid).map(([path]) => path), error: null };
+    }
     if (name === "own_photo_objects") {
       return { data: [...this.objects].filter(([, object]) => object.owner === uid).map(([path]) => path), error: null };
     }
@@ -387,6 +406,16 @@ export class FakeCloud {
   /** `private.can_see_photo`: a row the caller may read names it. */
   private canSeePhoto(photo: string, uid: string): boolean {
     return PHOTO_TABLES.some((table) => this.rows(table).some((row) => row.photo_id === photo && this.canRead(row.cabinet_id, uid)));
+  }
+
+  /** `private.can_see_document`: a live row the caller may read names it. */
+  private canSeeDocument(file: string, uid: string): boolean {
+    return this.rows("documents").some((row) => row.file_id === file && row.deleted_at == null && this.canRead(row.cabinet_id, uid));
+  }
+
+  /** `private.can_place_document`: the uploader may write every cabinet a row naming it is in. */
+  private canPlaceDocument(file: string, uid: string): boolean {
+    return this.rows("documents").every((row) => row.file_id !== file || this.canWrite(row.cabinet_id, uid));
   }
 
   /** `private.can_place_photo`: the uploader may write every cabinet a row naming it is in. */
@@ -482,34 +511,40 @@ export class FakeCloud {
       },
       storage: {
         from: (bucket: string) => {
-          if (bucket !== "photos") throw new Error(`unexpected bucket ${bucket}`);
+          const rules =
+            bucket === "photos"
+              ? { objects: cloud.objects, pattern: PHOTO_OBJECT, types: ["image/jpeg"], see: cloud.canSeePhoto.bind(cloud), place: cloud.canPlacePhoto.bind(cloud) }
+              : bucket === "documents"
+                ? { objects: cloud.documentObjects, pattern: DOCUMENT_OBJECT, types: ["application/pdf", "image/jpeg"], see: cloud.canSeeDocument.bind(cloud), place: cloud.canPlaceDocument.bind(cloud) }
+                : null;
+          if (!rules) throw new Error(`unexpected bucket ${bucket}`);
           return {
             upload: (path: string, body: Uint8Array, options: { contentType?: string; upsert?: boolean }) =>
               cloud.answer(`upload ${path}`, undefined, () => {
                 const uid = cloud.user;
-                const existing = cloud.objects.get(path);
-                const photo = PHOTO_OBJECT.exec(path)?.[1];
+                const existing = rules.objects.get(path);
+                const id = rules.pattern.exec(path)?.[1];
                 const refused = { data: null, error: { message: "new row violates row-level security policy", status: 403 } };
-                if (!uid || !photo || options.contentType !== "image/jpeg") return refused;
+                if (!uid || !id || !rules.types.includes(options.contentType ?? "")) return refused;
                 if (existing && (!options.upsert || existing.owner !== uid)) return { data: null, error: { message: "The resource already exists", status: 409 } };
-                if (!existing && !cloud.canPlacePhoto(photo, uid)) return refused;
-                cloud.objects.set(path, { owner: uid, bytes: new Uint8Array(body), at: Date.now() });
+                if (!existing && !rules.place(id, uid)) return refused;
+                rules.objects.set(path, { owner: uid, bytes: new Uint8Array(body), at: Date.now() });
                 return { data: { path }, error: null };
               }),
             download: (path: string) =>
               cloud.answer(`download ${path}`, undefined, () => {
                 if (cloud.downloadFailure) return { data: null, error: cloud.downloadFailure };
                 const uid = cloud.user;
-                const object = cloud.objects.get(path);
-                const photo = PHOTO_OBJECT.exec(path)?.[1];
-                if (!uid || !object || !photo || (object.owner !== uid && !cloud.canSeePhoto(photo, uid))) {
+                const object = rules.objects.get(path);
+                const id = rules.pattern.exec(path)?.[1];
+                if (!uid || !object || !id || (object.owner !== uid && !rules.see(id, uid))) {
                   return { data: null, error: { message: "Object not found", status: 404 } };
                 }
-                return { data: new Blob([object.bytes as BlobPart], { type: "image/jpeg" }), error: null };
+                return { data: new Blob([object.bytes as BlobPart]), error: null };
               }),
             remove: (paths: string[]) =>
               cloud.answer(`remove ${paths.length}`, undefined, () => {
-                for (const path of paths) if (cloud.objects.get(path)?.owner === cloud.user) cloud.objects.delete(path);
+                for (const path of paths) if (rules.objects.get(path)?.owner === cloud.user) rules.objects.delete(path);
                 return { data: [], error: null };
               }),
           };

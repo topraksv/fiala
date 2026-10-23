@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
-import { useIsFocused, useNavigation } from "expo-router";
+import { useIsFocused, useNavigation, unstable_useIsNavigating as useIsNavigating } from "expo-router";
 // `usePreventRemove` has no root export yet.
 import { usePreventRemove } from "expo-router/react-navigation";
 
@@ -36,6 +36,8 @@ export function useDirtyExitGuard(dirty: boolean): { allowExit: (action: () => v
   const focused = useIsFocused();
   const dirtyRef = useRef(dirty);
   const [exitAllowed, setExitAllowed] = useState(false);
+  const [exitRan, setExitRan] = useState(false);
+  const navigating = useIsNavigating();
   const exitAllowedRef = useRef(exitAllowed);
   const pendingExitRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -53,14 +55,29 @@ export function useDirtyExitGuard(dirty: boolean): { allowExit: (action: () => v
   // navigation in between is still guarded.
   usePreventRemove(dirty && !exitAllowed, ({ data }) => confirmDiscard(true, () => navigation.dispatch(data.action)));
 
+  // After the lifted guard has committed. Setting `exitRan` in the same tick batches it with any
+  // navigation the action queues, so the effect below never sees the action without its navigation.
   useEffect(() => {
     if (!exitAllowed) return;
-    const action = pendingExitRef.current;
-    pendingExitRef.current = null;
-    action?.();
-    const timer = setTimeout(() => setExitAllowed(false), 0);
+    const timer = setTimeout(() => {
+      const action = pendingExitRef.current;
+      pendingExitRef.current = null;
+      action?.();
+      setExitRan(true);
+    }, 0);
     return () => clearTimeout(timer);
   }, [exitAllowed]);
+
+  // SDK 58 queues navigation and commits it renders later: re-arming on a timer turned a saved
+  // form's exit into a discard prompt. An action that does not navigate re-arms at once.
+  useEffect(() => {
+    if (!exitRan || navigating) return;
+    const timer = setTimeout(() => {
+      setExitRan(false);
+      setExitAllowed(false);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [exitRan, navigating]);
 
   // On iOS the prevented swipe slides the screen away and
   // back before asking, which reads as the draft lost and then found. A dirty

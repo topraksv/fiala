@@ -7,11 +7,16 @@
 
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
+// By name: `import/namespace` does not follow expo-notifications 58's `export *` of its enums, which tsc checks.
+import { AndroidImportance, IosAuthorizationStatus } from "expo-notifications";
 
 import { readCabinet } from "../data/cabinet";
+import { readDoseAnswers, readDosePlans } from "../data/doses";
+import { localDay } from "../domain/boxes";
+import { dosesToSay, shiftDay } from "../domain/doses";
 import { planReminders, readTarget, routeOf, targetPayload, type Reminder, type ReminderRoute } from "../domain/reminders";
 import { tr } from "../i18n/tr";
-import { readReminderPreferences, saveRemindersOn } from "./reminder-preferences";
+import { readDoseRinging, readReminderPreferences, ringsHere, saveRemindersOn } from "./reminder-preferences";
 
 export const remindersAvailable = true;
 
@@ -25,19 +30,19 @@ function granted(status: Notifications.NotificationPermissionsStatus): boolean {
   if (Platform.OS !== "ios") return status.granted;
   const ios = status.ios?.status;
   return (
-    ios === Notifications.IosAuthorizationStatus.AUTHORIZED ||
-    ios === Notifications.IosAuthorizationStatus.PROVISIONAL ||
-    ios === Notifications.IosAuthorizationStatus.EPHEMERAL
+    ios === IosAuthorizationStatus.AUTHORIZED ||
+    ios === IosAuthorizationStatus.PROVISIONAL ||
+    ios === IosAuthorizationStatus.EPHEMERAL
   );
 }
 
 async function ensureChannel(): Promise<void> {
   if (Platform.OS !== "android") return;
-  await Notifications.setNotificationChannelAsync(CHANNEL, { name: tr.reminders.title, importance: Notifications.AndroidImportance.DEFAULT });
+  await Notifications.setNotificationChannelAsync(CHANNEL, { name: tr.reminders.title, importance: AndroidImportance.DEFAULT });
 }
 
 /** Asked only from Ayarlar's switch; `false` when the phone refused. */
-export async function enableReminders(): Promise<boolean> {
+export async function enableReminders(me: string | null): Promise<boolean> {
   await ensureChannel();
   const current = await Notifications.getPermissionsAsync();
   if (!granted(granted(current) ? current : await Notifications.requestPermissionsAsync())) {
@@ -45,7 +50,7 @@ export async function enableReminders(): Promise<boolean> {
     return false;
   }
   await saveRemindersOn(true);
-  await replanReminders();
+  await replanReminders(me);
   return true;
 }
 
@@ -57,19 +62,34 @@ export async function disableReminders(): Promise<void> {
   }
 }
 
-async function planned(): Promise<Reminder[]> {
-  const { names, hour, muted } = await readReminderPreferences();
-  const cabinet = await readCabinet();
+/**
+ * A week of doses, renewed every time the app leaves the screen; past that,
+ * `planReminders` keeps the boxes' warnings their half of `REMINDERS_MAX`.
+ */
+const DOSE_DAYS = 7;
+
+async function planned(me: string | null): Promise<Reminder[]> {
+  const now = new Date();
+  const today = localDay(now);
+  const [{ names, hour, muted }, cabinet, plans, chosen, answers] = await Promise.all([
+    readReminderPreferences(),
+    readCabinet(),
+    readDosePlans(),
+    readDoseRinging(),
+    readDoseAnswers(shiftDay(today, -1), shiftDay(today, DOSE_DAYS)),
+  ]);
   const boxes = cabinet.flatMap((product) => product.boxes.map((box) => ({ ...box, name: tr.common.boxName(product, box) })));
-  return planReminders({ now: new Date(), boxes, names, hour, muted });
+  const ringing = plans.filter((plan) => ringsHere(plan, me, chosen));
+  const doses = dosesToSay(ringing, answers, now, DOSE_DAYS).map(({ planId, at }) => ({ at, name: ringing.find((plan) => plan.id === planId)!.name }));
+  return planReminders({ now, boxes, names, hour, muted, doses });
 }
 
 // Planning at start and at every trip to the background can overlap; each waits for the last.
 let queue: Promise<void> = Promise.resolve();
 
 /** Cancel and schedule again from what is on the device now; nothing while off or refused. */
-export function replanReminders(): Promise<void> {
-  queue = queue.catch(() => {}).then(replace);
+export function replanReminders(me: string | null): Promise<void> {
+  queue = queue.catch(() => {}).then(() => replace(me));
   return queue;
 }
 
@@ -82,14 +102,14 @@ export function cancelReminders(): Promise<void> {
   return queue;
 }
 
-async function replace(): Promise<void> {
+async function replace(me: string | null): Promise<void> {
   if (!(await readReminderPreferences()).on || !granted(await Notifications.getPermissionsAsync())) {
     await Notifications.cancelAllScheduledNotificationsAsync();
     return;
   }
   await ensureChannel();
   // Planned before anything is cancelled: a failed read keeps yesterday's reminders.
-  const next = await planned();
+  const next = await planned(me);
   await Notifications.cancelAllScheduledNotificationsAsync();
   for (const reminder of next) {
     await Notifications.scheduleNotificationAsync({

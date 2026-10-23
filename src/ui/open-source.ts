@@ -24,6 +24,7 @@ export const OPEN_SOURCE: Readonly<Record<string, readonly string[]>> = {
     "expo-notifications",
     "expo-router",
     "expo-secure-store",
+    "expo-sharing",
     "expo-splash-screen",
     "expo-sqlite",
     "expo-status-bar",

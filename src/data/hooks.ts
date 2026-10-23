@@ -4,6 +4,8 @@ import { useMemo, useSyncExternalStore } from "react";
 import { liveStore, type LiveStore } from "./live-query";
 import { useSession } from "../auth/session";
 import { readActivity, readCabinet, readHouseholdEvents, readChanges, readHouseholds, readMoves, readNamed, readPeople, writes } from "./cabinet";
+import { readDocuments } from "./documents";
+import { readDoseAnswers, readDosePlans } from "./doses";
 import { frozenFrom, openHouseholdOf, profileChoice, readSettings } from "./settings";
 
 function useStore<T>(store: LiveStore<T>) {
@@ -18,6 +20,9 @@ const peopleStore = liveStore(readPeople, ["people", "photos", "cabinets"]);
 const locationsStore = liveStore(() => readNamed("locations"), ["locations", "cabinets"]);
 const tagsStore = liveStore(() => readNamed("tags"), ["tags", "cabinets"]);
 const householdsStore = liveStore(readHouseholds, ["cabinets", "cabinet_members", "photos"]);
+// Its links name products and boxes, which a move or a delete changes under it.
+const documentsStore = liveStore(readDocuments, ["documents", "document_links", "products", "packages", "cabinets"]);
+const dosePlansStore = liveStore(readDosePlans, ["dose_plans", "products", "packages", "cabinets"]);
 const unwatched = () => () => {};
 
 export function useSettings() {
@@ -64,6 +69,20 @@ export function useShownCabinet() {
   const cabinet = useCabinet();
   const { shows } = useHouseholds();
   return { ...cabinet, data: cabinet.data.filter((product) => shows(product.cabinetId)) };
+}
+
+export function useDocuments() {
+  return useStore(documentsStore);
+}
+
+export function useDosePlans() {
+  return useStore(dosePlansStore);
+}
+
+/** The answers to the doses of a span of local days. */
+export function useDoseAnswers(from: string, to: string) {
+  const store = useMemo(() => liveStore(() => readDoseAnswers(from, to), ["dose_logs", "cabinets"]), [from, to]);
+  return useStore(store);
 }
 
 export function usePeople() {

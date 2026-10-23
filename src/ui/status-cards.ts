@@ -7,7 +7,7 @@
 
 import { kv } from "../services/kv";
 
-export const STATUS_CARDS = ["lists", "expired", "soon", "opened", "stock", "undated", "boxes", "people", "recent"] as const;
+export const STATUS_CARDS = ["doses", "lists", "expired", "soon", "opened", "stock", "undated", "boxes", "people", "recent"] as const;
 export type StatusCard = (typeof STATUS_CARDS)[number];
 
 export interface CardLayout {

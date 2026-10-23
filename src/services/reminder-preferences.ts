@@ -16,6 +16,7 @@ const KEYS = {
   names: "fiala.reminders.names",
   hour: "fiala.reminders.hour",
   muted: "fiala.reminders.muted",
+  doses: "fiala.reminders.doses",
   seen: "fiala.notices.seenAt",
 } as const;
 
@@ -65,6 +66,29 @@ export function saveReminderHour(hour: number): Promise<void> {
 
 export function saveReminderMuted(muted: readonly ReminderGroup[]): Promise<void> {
   return kv.set(KEYS.muted, muted.join(","));
+}
+
+/**
+ * Which plans this phone says the doses of, by plan id, where the person
+ * chose; a plan they did not choose for is said by the phone of whoever made
+ * it, so a household's plans do not ring on every member's phone.
+ */
+export async function readDoseRinging(): Promise<Record<string, boolean>> {
+  try {
+    const stored = JSON.parse((await kv.get(KEYS.doses)) ?? "{}") as unknown;
+    // `null` throws here and lands in the catch; a string or a number has no boolean entries.
+    return Array.isArray(stored) ? {} : Object.fromEntries(Object.entries(stored as object).filter(([, on]) => typeof on === "boolean"));
+  } catch {
+    return {};
+  }
+}
+
+/** A plan made on a device not yet synced names no maker, and is this person's. */
+export const ringsHere = (plan: { id: string; createdBy: string | null }, me: string | null, chosen: Record<string, boolean>) =>
+  chosen[plan.id] ?? (plan.createdBy == null || plan.createdBy === me);
+
+export async function saveDoseRinging(planId: string, on: boolean): Promise<void> {
+  await kv.set(KEYS.doses, JSON.stringify({ ...(await readDoseRinging()), [planId]: on }));
 }
 
 /** Everything said up to this moment has been read; null when the centre was never opened. */

@@ -23,11 +23,15 @@ const THEIRS = "SELECT cabinet_id FROM cabinet_members WHERE user_id = ? AND rol
 /** Each part's tables and which of their rows. */
 type Parts = Readonly<Record<string, readonly (readonly [SyncedTableName, string])[]>>;
 const PARTS: Parts = {
-  // Every box, product, move, edit and tag, and the people and places they name: a
+  // Every box, product, move, edit, tag, document and dose, and the people and places they name: a
   // person left behind would name boxes that are gone. The health-data
   // consent goes with the data it covered, the one setting a reset takes:
   // clearing the cabinet is how that consent is withdrawn.
   cabinet: [
+    ["dose_logs", "1"],
+    ["dose_plans", "1"],
+    ["document_links", "1"],
+    ["documents", "1"],
     ["package_moves", "1"],
     ["package_changes", "1"],
     ["product_tags", "1"],

@@ -19,6 +19,7 @@ import PackageOpen from "lucide-react-native/icons/package-open";
 import PackagePlus from "lucide-react-native/icons/package-plus";
 import PackageX from "lucide-react-native/icons/package-x";
 import UserCheck from "lucide-react-native/icons/user-check";
+import Pill from "lucide-react-native/icons/pill";
 import UserPlus from "lucide-react-native/icons/user-plus";
 
 import { formatDay, localDay } from "../domain/boxes";
@@ -30,6 +31,7 @@ import { useNotices } from "../ui/notices";
 import { spacing, useTheme } from "../ui/theme";
 
 const ICONS: Record<ReminderKind, LucideIcon> = {
+  dose: Pill,
   expirySoon: Clock,
   expired: CalendarX,
   openSoon: CalendarClock,

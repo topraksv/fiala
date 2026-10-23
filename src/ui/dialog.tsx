@@ -13,7 +13,18 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Animated, Modal, Platform, Pressable, Text, View, useWindowDimensions, type StyleProp, type ViewStyle } from "react-native";
+import {
+  Animated,
+  Modal,
+  Platform,
+  Pressable,
+  Text,
+  View,
+  useWindowDimensions,
+  type StyleProp,
+  type ViewStyle,
+  type ViewInstance,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { create } from "zustand";
 import { tr } from "../i18n/tr";
@@ -173,7 +184,7 @@ function useAnswer<T>(settle: (value: T) => void): { visible: boolean; answer: (
  * marked `accessible={false}` (or they swallow their children), the modal's
  * name, and the heading that takes focus.
  */
-function DialogShell({
+export function DialogShell({
   title,
   message,
   titleRef,
@@ -197,7 +208,7 @@ function DialogShell({
   message?: string;
   /** Drawn above the title: the tour's picture of the slide. */
   lead?: ReactNode;
-  titleRef: RefObject<View | null>;
+  titleRef: RefObject<ViewInstance | null>;
   onDismiss: () => void;
   /** A panel holding an unsaved draft: its `onDismiss` asks first, so a drag springs home rather than leaving. */
   dirty?: boolean;
@@ -349,7 +360,7 @@ function DialogShell({
   );
 }
 
-function Actions({ children }: { children: ReactNode }) {
+export function Actions({ children }: { children: ReactNode }) {
   return <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm, flexWrap: "wrap", marginTop: spacing.lg }}>{children}</View>;
 }
 

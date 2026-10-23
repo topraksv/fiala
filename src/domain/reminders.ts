@@ -25,12 +25,13 @@ export interface ReminderBox extends BoxFacts {
   askedAt?: string | null;
 }
 
-export type ReminderKind = "expirySoon" | "expired" | "openSoon" | "openEnded" | "low" | "empty" | "undated" | "check" | HouseholdKind;
+export type ReminderKind = "dose" | "expirySoon" | "expired" | "openSoon" | "openEnded" | "low" | "empty" | "undated" | "check" | HouseholdKind;
 /** Said in the centre alone, of the person's households (F2.9, F2.11). */
 export type HouseholdKind = "asked" | "memberJoined" | "boxAdded" | "boxLeft";
 
 /** What a person can silence (F1.29): a warning and its passing are one subject. */
 export const REMINDER_GROUPS = {
+  dose: ["dose"],
   expiry: ["expirySoon", "expired"],
   opened: ["openSoon", "openEnded"],
   stock: ["low", "empty"],
@@ -59,7 +60,7 @@ export interface Reminder {
  * notification.
  */
 // A household is never a phone's target: what the centre alone says may open one.
-export type NotificationTarget = { kind: "box"; id: string } | { kind: "cabinet" } | { kind: "household"; id: string };
+export type NotificationTarget = { kind: "box"; id: string } | { kind: "cabinet" } | { kind: "doses" } | { kind: "household"; id: string };
 
 const TARGET_KEY = "fialaTarget";
 
@@ -70,15 +71,15 @@ export function targetPayload(target: NotificationTarget): Record<string, unknow
 /** A payload this build did not write, or an older one's, opens nothing. */
 export function readTarget(data: unknown): NotificationTarget | null {
   const raw = (data as Record<string, unknown> | null)?.[TARGET_KEY] as { kind?: unknown; id?: unknown } | undefined;
-  if (raw?.kind === "cabinet") return { kind: "cabinet" };
+  if (raw?.kind === "cabinet" || raw?.kind === "doses") return { kind: raw.kind };
   return raw?.kind === "box" && typeof raw.id === "string" && raw.id !== "" ? { kind: "box", id: raw.id } : null;
 }
 
-export type ReminderRoute = { pathname: "/cabinet" } | { pathname: "/box/[id]" | "/household/[id]"; params: { id: string } };
+export type ReminderRoute = { pathname: "/cabinet" | "/doses" } | { pathname: "/box/[id]" | "/household/[id]"; params: { id: string } };
 
 /** A box gone since opens its page, which says so. */
 export function routeOf(target: NotificationTarget): ReminderRoute {
-  if (target.kind === "cabinet") return { pathname: "/cabinet" };
+  if (target.kind === "cabinet" || target.kind === "doses") return { pathname: target.kind === "cabinet" ? "/cabinet" : "/doses" };
   return { pathname: target.kind === "box" ? "/box/[id]" : "/household/[id]", params: { id: target.id } };
 }
 
@@ -118,6 +119,8 @@ export interface ReminderInput {
   muted: readonly ReminderGroup[];
   /** What happened in the person's households, for the centre: never planned. */
   events?: readonly Reminder[];
+  /** The doses this phone says (`dosesToSay`), each at its own moment, not the hour: never in the centre. */
+  doses?: readonly { at: Date; name: string }[];
 }
 
 /**
@@ -126,7 +129,7 @@ export interface ReminderInput {
  * one per kind and moment, opening the cabinet: one naming a box would hand
  * back the identity just hidden (Helix's `privateNotificationTarget`).
  */
-function remindersAround({ now, boxes, names, hour, muted, events = [] }: ReminderInput, ahead: boolean): Reminder[] {
+function remindersAround({ now, boxes, names, hour, muted, events = [], doses = [] }: ReminderInput, ahead: boolean): Reminder[] {
   const edge = new Date(now);
   edge.setDate(edge.getDate() + (ahead ? HORIZON_DAYS : -HORIZON_DAYS));
   const [from, to] = ahead ? [now, edge] : [edge, now];
@@ -141,6 +144,8 @@ function remindersAround({ now, boxes, names, hour, muted, events = [] }: Remind
   // An ask is said when it came, not at the hour, and only by the centre: one from a clock ahead is not the phone's to plan.
   if (!ahead) for (const box of home) if (box.askedAt) all.push(about("asked", new Date(box.askedAt), box));
   if (!ahead) all.push(...events);
+  // A dose opens the day's doses, named or not: the list is where it is answered.
+  if (ahead) for (const dose of doses) all.push({ kind: "dose", at: dose.at, name: names ? dose.name : null, target: { kind: "doses" } });
   // The cabinet check, on the first of each month, of a cabinet with something in it: thirty days either way hold two at most.
   if (home.length > 0) {
     for (const month of [-1, 0, 1, 2]) all.push({ kind: "check", at: new Date(now.getFullYear(), now.getMonth() + month, 1, hour), name: null, target: { kind: "cabinet" } });
@@ -155,11 +160,19 @@ function remindersAround({ now, boxes, names, hour, muted, events = [] }: Remind
   });
 }
 
-/** What the phone is to say, soonest first; this very moment has gone. */
+const soonest = (a: Reminder, b: Reminder) => a.at.getTime() - b.at.getTime();
+
+/**
+ * What the phone is to say, soonest first; this very moment has gone. Doses
+ * and the rest each keep half of what iOS holds and take what the other
+ * leaves: soonest first alone, a week of doses would push out every warning.
+ */
 export function planReminders(input: ReminderInput): Reminder[] {
-  return remindersAround(input, true)
-    .sort((a, b) => a.at.getTime() - b.at.getTime())
-    .slice(0, REMINDERS_MAX);
+  const all = remindersAround(input, true).sort(soonest);
+  const doses = all.filter((reminder) => reminder.kind === "dose");
+  const others = all.filter((reminder) => reminder.kind !== "dose");
+  const kept = doses.slice(0, Math.max(REMINDERS_MAX / 2, REMINDERS_MAX - others.length));
+  return [...kept, ...others.slice(0, REMINDERS_MAX - kept.length)].sort(soonest);
 }
 
 /**

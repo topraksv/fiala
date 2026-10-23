@@ -105,6 +105,11 @@ vi.mock("../../src/sync/photos", () => ({
     if (sync.purgeFails) throw new Error("Failed to fetch");
   },
 }));
+vi.mock("../../src/sync/documents", () => ({
+  purgeOwnDocuments: async () => {
+    cloud.calls.push("documents:purge");
+  },
+}));
 vi.mock("../../src/sync/supabase", () => {
   const user = (found: CloudUser) => ({ id: found.id, email: found.email, last_sign_in_at: "2026-09-26T09:00:00.000Z" });
   const client = {
@@ -669,7 +674,7 @@ describe("deleting the account", () => {
     await makeRow();
     expect(await session().deleteAccount()).toBeNull();
     expect(sync.calls).toEqual([`start:${A.id}`, "stop"]);
-    expect(cloud.calls).toEqual(["photos:purge", "rpc:delete_own_account", "signOut:global", "signOut:local"]);
+    expect(cloud.calls).toEqual(["photos:purge", "documents:purge", "rpc:delete_own_account", "signOut:global", "signOut:local"]);
     expect(session().userId).toBeNull();
     expect(rows()).toBe(0);
     for (const key of [OWNER, LAST_USER, LAST_EMAIL]) expect(device.stored.has(key)).toBe(false);

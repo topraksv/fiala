@@ -3,6 +3,7 @@ import { Platform, Text, View, useWindowDimensions } from "react-native";
 import { router } from "expo-router";
 import * as LocalAuthentication from "expo-local-authentication";
 import Bell from "lucide-react-native/icons/bell";
+import BookOpen from "lucide-react-native/icons/book-open";
 import CircleQuestionMark from "lucide-react-native/icons/circle-question-mark";
 import CircleUserRound from "lucide-react-native/icons/circle-user-round";
 import CloudOff from "lucide-react-native/icons/cloud-off";
@@ -41,6 +42,7 @@ import { alpha, appearanceTile, authHero, borderWidth, circle, controlSize, dens
 import { radioGroupKeys } from "../../ui/keys";
 import { leaveAccount } from "../../ui/operation-wait";
 import { setAppearance } from "../../ui/theme-transition";
+import { TourModal } from "../../ui/tour";
 
 const THEMES: readonly [ThemePreference, string][] = [
   ["system", tr.settings.themeSystem],
@@ -65,6 +67,7 @@ export default function SettingsScreen() {
   // The account is greeted as its own cabinet knows it.
   const own = useHouseholds().me;
   const me = people.data.find((person) => person.id === profileChoice(settings.data, "me", own, people.data));
+  const [touring, setTouring] = useState(false);
   return (
     <Screen title={tr.tabs.settings} width="workspace">
       <Greeting me={me} />
@@ -130,9 +133,11 @@ export default function SettingsScreen() {
       <SectionHeader>{tr.help.title}</SectionHeader>
       <Card rows>
         <ListRow icon={CircleQuestionMark} title={tr.help.title} subtitle={tr.help.row} chevron onPress={() => router.push("/help")} />
+        <ListRow icon={BookOpen} title={tr.tour.replay} subtitle={tr.tour.replayDesc} chevron onPress={() => setTouring(true)} />
         <ListRow icon={MessageSquare} title={tr.feedback.title} subtitle={tr.feedback.settingsDesc} chevron onPress={() => router.push("/feedback")} />
       </Card>
       <Body muted style={{ fontSize: type.small.fontSize, textAlign: "center", marginTop: spacing.md }}>{tr.settings.footer}</Body>
+      {touring ? <TourModal onClose={() => setTouring(false)} /> : null}
     </Screen>
   );
 }
@@ -142,6 +147,7 @@ export default function SettingsScreen() {
  * asked from the first switch alone; the rest shows once it is on.
  */
 function Reminders() {
+  const me = useSession((s) => s.userId);
   const [preferences, setPreferences] = useState<ReminderPreferences | null>(null);
   useEffect(() => void readReminderPreferences().then(setPreferences, () => setPreferences(REMINDER_DEFAULTS)), []);
   if (!preferences) return null;
@@ -149,7 +155,7 @@ function Reminders() {
   // Drawn at once, and put back to what the phone ended with: refused, or failed.
   const turn = (next: boolean) => {
     setPreferences({ ...preferences, on: next });
-    (next ? enableReminders() : disableReminders().then(() => false)).then(
+    (next ? enableReminders(me) : disableReminders().then(() => false)).then(
       (allowed) => {
         if (next && !allowed) {
           setPreferences({ ...preferences, on: false });
@@ -164,7 +170,7 @@ function Reminders() {
   };
   const change = (next: Partial<ReminderPreferences>, save: Promise<void>) => {
     setPreferences({ ...preferences, ...next });
-    save.then(replanReminders).catch(() => appError(tr.errors.saveFailed));
+    save.then(() => replanReminders(me)).catch(() => appError(tr.errors.saveFailed));
   };
   const mute = (group: ReminderGroup) => (said: boolean) => {
     const next = said ? muted.filter((each) => each !== group) : [...muted, group];

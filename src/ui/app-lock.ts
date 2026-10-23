@@ -186,7 +186,8 @@ export function useNavigationAcrossLock(locked: boolean | null, navigatorShown: 
     const root = navigation.getRootState();
     const state = parked.current;
     parked.current = null;
-    if (root) navigation.resetRoot({ ...state, key: root.key });
+    // SDK 58's container ref has no `resetRoot`; a reset keyed to the root navigator replaces its whole tree.
+    if (root) navigation.reset({ ...state, key: root.key });
   }, [locked, navigatorShown, navigation]);
 }
 

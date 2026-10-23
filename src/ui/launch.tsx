@@ -7,7 +7,7 @@
  * rest and removes the screen without a fade the moment the app is ready.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Animated, Platform, StyleSheet, type ViewStyle } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
 
@@ -27,6 +27,15 @@ const MARK_WIDTH = 150;
 
 /** Off until the app has a name and the kit's wordmark: the placeholder art has none to write. */
 const NAMED = false;
+
+let launched = false;
+const listeners = new Set<() => void>();
+const subscribe = (listener: () => void) => (listeners.add(listener), () => void listeners.delete(listener));
+
+/** Whether the launch screen has left: a dialog opened before it would sit over the mark still drawing. */
+export function useLaunched(): boolean {
+  return useSyncExternalStore(subscribe, () => launched);
+}
 
 /** `shown` waits for the palette; `ready` is the app's first screen drawn under this one. */
 export function Launch({ shown, ready }: { shown: boolean; ready: boolean }) {
@@ -59,6 +68,12 @@ export function Launch({ shown, ready }: { shown: boolean; ready: boolean }) {
     animation.start(({ finished }) => finished && setGone(true));
     return () => animation.stop();
   }, [done, reducedMotion, opacity]);
+
+  useEffect(() => {
+    if (!gone || launched) return;
+    launched = true;
+    for (const listener of listeners) listener();
+  }, [gone]);
 
   if (!shown || gone) return null;
   const leaving = done && !reducedMotion;

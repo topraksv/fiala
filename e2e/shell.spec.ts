@@ -1,7 +1,8 @@
 /**
  * The first thing a person meets, in a real browser against the export that
- * deploys, less its Supabase project: the shell opens on its home tab, reaches
- * Ayarlar, changes the theme and finds it kept after a reload. The unit suite
+ * deploys, less its Supabase project: the shell opens on its home tab with the
+ * tour, reaches Ayarlar, changes the theme and finds it, and the tour seen,
+ * kept after a reload. The unit suite
  * holds each part; this holds that they meet — the sqlite worker, the policy
  * the page runs under, the router and the screens.
  */
@@ -26,10 +27,14 @@ async function watchFailures(page: Page): Promise<string[]> {
   return failures;
 }
 
-test("the shell opens, reaches Ayarlar and keeps the theme @cross-browser", async ({ page }) => {
+test("the shell opens with the tour, reaches Ayarlar and keeps the theme @cross-browser", async ({ page }) => {
   const failures = await watchFailures(page);
   await page.goto("/fiala/");
 
+  await expect(page.getByRole("dialog", { name: "Evdeki her kutu tek yerde" })).toBeVisible();
+  for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "İleri" }).click();
+  await page.getByRole("button", { name: "Başla" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Henüz özetlenecek bir şey yok" })).toBeVisible();
 
   await page.getByRole("tab", { name: "Ayarlar" }).click();
@@ -39,6 +44,9 @@ test("the shell opens, reaches Ayarlar and keeps the theme @cross-browser", asyn
   await expect(page.getByRole("radio", { name: "Koyu" })).toBeChecked();
 
   await page.reload();
+  await page.getByRole("tab", { name: "Durum" }).click();
+  await expect(page.getByRole("heading", { name: "Henüz özetlenecek bir şey yok" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("tab", { name: "Ayarlar" }).click();
   await expect(page.getByRole("radio", { name: "Koyu" })).toBeChecked();
 

@@ -51,6 +51,9 @@ const { deterministicId, naturalKeys } = await import("../../src/db/ids");
 const { addPackage, openHousehold, readCabinet, remainingMilli, setPhoto, takeFrom } = await import("../../src/data/cabinet");
 const { readPhoto } = await import("../../src/data/photos");
 const { purgeOwnPhotos } = await import("../../src/sync/photos");
+const { addDocument, moveDocument, readDocuments } = await import("../../src/data/documents");
+const { fetchDocumentFile, purgeOwnDocuments } = await import("../../src/sync/documents");
+const { addDosePlan, answerDose, readDoseAnswers, readDosePlans } = await import("../../src/data/doses");
 const { acceptInvite, answerOffer, cancelInvites, createInvite, offerCabinet, peekInvite, useOffers } = await import("../../src/sync/sharing");
 
 const USER = "11111111-1111-4111-8111-111111111111";
@@ -1336,5 +1339,248 @@ describe("an invitation into a household (F2.2)", () => {
       expect(received(), "withdrawn").toEqual([]);
       expect(await answerOffer(SECOND, true, "Ece"), "a withdrawn offer cannot be accepted").toEqual({ refused: tr.sharing.errInvite });
     });
+  });
+});
+
+describe("documents", () => {
+  const HOUSE = "0190a000-0000-7000-8000-00000000c0c0";
+  const PDF = Buffer.from("%PDF-1.7 reçete").toString("base64");
+  const FIELDS = { kind: "prescription", title: "Reçete", personId: null, issuedOn: null, note: null, reference: null } as const;
+
+  /** C's household with A in it, and C's prescription there, sent. */
+  async function shared(): Promise<{ id: string; fileId: string }> {
+    cloud.insertAsServer("cabinets", { id: HOUSE, owner_id: OTHER, name: "Ev" });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000c0c1", cabinet_id: HOUSE, user_id: OTHER, role: "owner", name: "Can", seen_at: null });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000c0c2", cabinet_id: HOUSE, user_id: USER, role: "editor", name: "Ece", seen_at: null });
+    const id = await on("C", async () => {
+      const made = await addDocument(HOUSE, FIELDS, { base64: PDF, type: "pdf" });
+      expect(await sync()).toBe(true);
+      return made;
+    });
+    return { id, fileId: String(cloud.rows("documents").find((row) => row.id === id)!.file_id) };
+  }
+
+  it("sends a file after its row, and a member fetches it only when opening it", async () => {
+    const { fileId } = await shared();
+    expect(cloud.requests.indexOf(`upload ${fileId}/file.pdf`)).toBeGreaterThan(cloud.requests.indexOf("upsert documents"));
+    await on("A", async () => {
+      expect(await sync()).toBe(true);
+      expect(await readDocuments()).toEqual([expect.objectContaining({ title: "Reçete", fileType: "pdf" })]);
+      expect(devices.A.prepare("SELECT COUNT(*) AS n FROM document_files").get(), "not after a pull").toEqual({ n: 0 });
+      expect(await fetchDocumentFile(fileId, "pdf")).toBe(PDF);
+      expect(devices.A.prepare("SELECT COUNT(*) AS n FROM document_files WHERE id = ?").get(fileId), "kept once fetched").toEqual({ n: 1 });
+      expect(await fetchDocumentFile(fileId, "jpeg"), "never as a type its bytes are not").toBeNull();
+    });
+  });
+
+  it("finishes a send cut short, Storage holding the file already", async () => {
+    const { fileId } = await shared();
+    await on("C", async () => {
+      devices.C.prepare("UPDATE document_files SET uploaded_at = NULL").run();
+      expect(await sync()).toBe(true);
+      expect(devices.C.prepare("SELECT uploaded_at IS NOT NULL AS sent FROM document_files WHERE id = ?").get(fileId)).toEqual({ sent: 1 });
+    });
+  });
+
+  it("holds no sync for a file that could not go, and sends it with the next", async () => {
+    cloud.failOn.set("upload ", { message: "Failed to fetch" });
+    const { fileId } = await shared();
+    expect(cloud.documentObjects.size).toBe(0);
+    await on("C", async () => {
+      expect(await fetchDocumentFile(fileId, "pdf"), "read from the device, unsent").toBe(PDF);
+      expect(cloud.requests.filter((request) => request.startsWith("download"))).toEqual([]);
+      expect(await sync()).toBe(true);
+    });
+    expect([...cloud.documentObjects.keys()]).toEqual([`${fileId}/file.pdf`]);
+  });
+
+  it("leaves the household it is moved out of, file and all, and is still its sender's", async () => {
+    const { id, fileId } = await shared();
+    await on("A", async () => {
+      await sync();
+      await fetchDocumentFile(fileId, "pdf");
+    });
+    await on("C", async () => {
+      await moveDocument(id, OTHER);
+      expect(await sync()).toBe(true);
+      expect(await readDocuments()).toEqual([expect.objectContaining({ cabinetId: OTHER, title: "Reçete" })]);
+      expect(await fetchDocumentFile(fileId, "pdf")).toBe(PDF);
+    });
+    await on("A", async () => {
+      expect(await sync()).toBe(true);
+      expect(await readDocuments()).toEqual([]);
+      expect(devices.A.prepare("SELECT COUNT(*) AS n FROM document_files").get(), "nor kept on the device").toEqual({ n: 0 });
+      expect((await cloud.client().storage.from("documents").download(`${fileId}/file.pdf`)).error).toMatchObject({ status: 404 });
+    });
+    expect(cloud.rows("documents").find((row) => row.id === id), "nothing an editor bringing it back would read").toMatchObject({ title: "", note: null, file_id: null });
+  });
+
+  it("undoes a move after it was sent, the server's naming of its writer notwithstanding", async () => {
+    const { id, fileId } = await shared();
+    await on("C", async () => {
+      const moved = (await moveDocument(id, OTHER))!;
+      expect(await sync()).toBe(true);
+      expect(cloud.rows("documents").find((row) => row.id === moved.id)).toMatchObject({ created_by: OTHER });
+      await undoRows(moved.written);
+      expect(await sync()).toBe(true);
+    });
+    expect(cloud.rows("documents").find((row) => row.id === id)).toMatchObject({ cabinet_id: HOUSE, title: "Reçete", file_id: fileId, deleted_at: null });
+  });
+
+  it("tells a file Storage does not have from a Storage or a network that did not answer", async () => {
+    const { fileId } = await shared();
+    await on("A", async () => {
+      await sync();
+      cloud.downloadFailure = { message: "Internal error", status: 500 };
+      await expect(fetchDocumentFile(fileId, "pdf")).rejects.toThrow("document download");
+      cloud.downloadFailure = { message: "Failed to fetch" };
+      await expect(fetchDocumentFile(fileId, "pdf")).rejects.toThrow("document download");
+      cloud.downloadFailure = { message: "Object not found", status: 404 };
+      expect(await fetchDocumentFile(fileId, "pdf"), "not there is an answer").toBeNull();
+      cloud.downloadFailure = null;
+      expect(await fetchDocumentFile("../" + fileId, "pdf"), "a name that is not a file's").toBeNull();
+      expect(cloud.requests.filter((request) => request.startsWith("download ../")), "nor asked of Storage").toEqual([]);
+      cloud.documentObjects.set(`${fileId}/file.jpg`, cloud.documentObjects.get(`${fileId}/file.pdf`)!);
+      expect(await fetchDocumentFile(fileId, "jpeg"), "never as a type its bytes are not").toBeNull();
+      expect(await fetchDocumentFile(fileId, "pdf")).toBe(PDF);
+    });
+  });
+
+  it("passes over a file Storage refuses for good, and asks no more this launch", async () => {
+    cloud.failOn.set("upload ", { message: "Payload too large", status: 413 });
+    const { fileId } = await shared();
+    await on("C", async () => {
+      const before = cloud.requests.length;
+      expect(await sync()).toBe(true);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("upload"))).toEqual([]);
+    });
+    expect(cloud.documentObjects.has(`${fileId}/file.pdf`)).toBe(false);
+  });
+
+  it("removes, a month on, the files no live row names, and keeps a named one", async () => {
+    const { id, fileId } = await shared();
+    const kept = await on("C", async () => {
+      const other = await addDocument(HOUSE, { ...FIELDS, title: "Tahlil" }, { base64: PDF, type: "pdf" });
+      await deleteRows("documents", [id]);
+      expect(await sync()).toBe(true);
+      return String(cloud.rows("documents").find((row) => row.id === other)!.file_id);
+    });
+    expect(cloud.documentObjects.size, "within the month, Storage keeps it").toBe(2);
+    const unnamed = cloud.documentObjects.get(`${fileId}/file.pdf`)!;
+    for (let at = 1; at < 200; at += 1) cloud.documentObjects.set(`0190d000-0000-7000-8000-${String(at).padStart(12, "0")}/file.pdf`, { ...unnamed });
+    for (const object of cloud.documentObjects.values()) object.at -= 31 * 86_400_000;
+    devices.C.prepare("INSERT INTO document_files (id, data, created_at) VALUES ('unsent', ?, ?)").run(PDF, new Date().toISOString());
+    const before = cloud.requests.length;
+    await on("C", () => sync());
+    expect(cloud.requests.slice(before).filter((request) => request.startsWith("remove")), "a hundred at a time").toEqual(["remove 100", "remove 100"]);
+    expect([...cloud.documentObjects.keys()]).toEqual([`${kept}/file.pdf`]);
+    expect(devices.C.prepare("SELECT id FROM document_files ORDER BY id").all(), "the device's goes once Storage had it; one never sent waits the month").toEqual([{ id: kept }, { id: "unsent" }]);
+    devices.C.prepare("UPDATE document_files SET created_at = ? WHERE id = 'unsent'").run(new Date(Date.now() - 31 * 86_400_000).toISOString());
+    await on("C", () => sync());
+    expect(devices.C.prepare("SELECT id FROM document_files").all()).toEqual([{ id: kept }]);
+    expect(fileId).not.toBe(kept);
+  });
+
+  it("fails no sync when the sweep cannot list or remove, and sweeps with a later one", async () => {
+    const { id } = await shared();
+    await on("C", async () => {
+      await deleteRows("documents", [id]);
+      expect(await sync()).toBe(true);
+    });
+    for (const object of cloud.documentObjects.values()) object.at -= 31 * 86_400_000;
+    for (const failing of ["rpc unnamed_documents", "remove "]) {
+      cloud.failOn.set(failing, { message: "Failed to fetch" });
+      await on("C", async () => expect(await sync()).toBe(true));
+      expect(cloud.documentObjects.size, failing).toBe(1);
+    }
+    await on("C", () => sync());
+    expect(cloud.documentObjects.size).toBe(0);
+  });
+
+  it("goes with the account that sent it", async () => {
+    const { fileId } = await shared();
+    const sent = cloud.documentObjects.get(`${fileId}/file.pdf`)!;
+    for (let at = 1; at < 200; at += 1) cloud.documentObjects.set(`0190d000-0000-7000-8000-${String(at).padStart(12, "0")}/file.pdf`, { ...sent });
+    const purge = () => purgeOwnDocuments(cloud.client() as unknown as Parameters<typeof purgeOwnDocuments>[0]);
+    for (const failing of ["rpc own_document_objects", "remove "]) {
+      cloud.failOn.set(failing, { message: "Failed to fetch" });
+      await expect(on("C", purge), failing).rejects.toThrow("document purge");
+    }
+    expect(cloud.documentObjects.size, "kept while the purge failed").toBe(200);
+    const before = cloud.requests.length;
+    await on("C", purge);
+    expect(cloud.requests.slice(before).filter((request) => request.startsWith("remove")), "a hundred at a time").toEqual(["remove 100", "remove 100"]);
+    expect(cloud.documentObjects.size).toBe(0);
+    expect(devices.C.prepare("SELECT uploaded_at FROM document_files WHERE id = ?").get(fileId), "marked unsent, should the account survive").toEqual({ uploaded_at: null });
+  });
+});
+
+describe("doses", () => {
+  const HOUSE = "0190a000-0000-7000-8000-00000000d0d0";
+  const DOSE = { dueOn: "2026-10-20", dueTime: "08:00" };
+
+  it("brings a household's plan to a member, who answers it from the household's box, and the last answer is the one both read", async () => {
+    cloud.insertAsServer("cabinets", { id: HOUSE, owner_id: OTHER, name: "Ev" });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000d0d1", cabinet_id: HOUSE, user_id: OTHER, role: "owner", name: "Can", seen_at: null });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000d0d2", cabinet_id: HOUSE, user_id: USER, role: "editor", name: "Ece", seen_at: null });
+    const { box, plan } = await on("C", async () => {
+      const made = await addPackage(HOUSE, { name: "Coraspin" }, { unit: "tablet" }, 30_000);
+      const productId = String((devices.C.prepare("SELECT product_id FROM packages").get() as { product_id: string }).product_id);
+      const planned = await addDosePlan({ productId, packageId: made, personId: null, amountMilli: 1000, times: ["08:00"], weekdays: 127, startsOn: "2026-10-19", endsOn: null, instructions: null });
+      expect(await sync()).toBe(true);
+      return { box: made, plan: planned };
+    });
+    expect(cloud.rows("dose_plans")).toEqual([expect.objectContaining({ id: plan, cabinet_id: HOUSE, created_by: OTHER })]);
+
+    const taken = await on("A", async () => {
+      await sync();
+      expect((await readDosePlans()).map((each) => [each.id, each.createdBy, each.unit])).toEqual([[plan, OTHER, "tablet"]]);
+      await undoRows(await answerDose(plan, DOSE, "taken"));
+      expect(await sync()).toBe(true);
+      expect(await readDoseAnswers("2026-10-20", "2026-10-20"), "an undo after the sync takes back the row the server stamped").toEqual([]);
+      const written = await answerDose(plan, DOSE, "taken");
+      expect(await sync()).toBe(true);
+      return written;
+    });
+    expect(cloud.rows("dose_logs")).toEqual([expect.objectContaining({ plan_id: plan, cabinet_id: HOUSE, status: "taken", answered_by: USER, deleted_at: null })]);
+
+    await on("C", async () => {
+      await sync();
+      expect(await remainingMilli(box)).toBe(29_000);
+      expect(await readDoseAnswers("2026-10-20", "2026-10-20")).toEqual([expect.objectContaining({ status: "taken", answeredBy: USER })]);
+      await answerDose(plan, DOSE, "skipped");
+      expect(await sync()).toBe(true);
+    });
+    expect(cloud.rows("dose_logs"), "the server names who answered last").toEqual([expect.objectContaining({ status: "skipped", answered_by: OTHER })]);
+
+    await on("A", async () => {
+      await sync();
+      expect(await remainingMilli(box)).toBe(30_000);
+      await expect(undoRows(taken), "an answer given since on another device is not undone from here").rejects.toThrow("Cannot undo");
+    });
+  });
+
+  it("takes a dose two devices both say was taken, offline, out of the box once", async () => {
+    cloud.insertAsServer("cabinets", { id: HOUSE, owner_id: OTHER, name: "Ev" });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000d0d1", cabinet_id: HOUSE, user_id: OTHER, role: "owner", name: "Can", seen_at: null });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000d0d2", cabinet_id: HOUSE, user_id: USER, role: "editor", name: "Ece", seen_at: null });
+    const { box, plan } = await on("C", async () => {
+      const made = await addPackage(HOUSE, { name: "Coraspin" }, { unit: "tablet" }, 30_000);
+      const productId = String((devices.C.prepare("SELECT product_id FROM packages").get() as { product_id: string }).product_id);
+      const planned = await addDosePlan({ productId, packageId: made, personId: null, amountMilli: 1000, times: ["08:00"], weekdays: 127, startsOn: "2026-10-19", endsOn: null, instructions: null });
+      expect(await sync()).toBe(true);
+      await answerDose(planned, DOSE, "taken");
+      return { box: made, plan: planned };
+    });
+    await on("A", async () => {
+      await sync();
+      await answerDose(plan, DOSE, "taken");
+      expect(await sync()).toBe(true);
+    });
+    await on("C", async () => {
+      expect(await sync()).toBe(true);
+      expect(await remainingMilli(box)).toBe(29_000);
+    });
+    expect(cloud.rows("package_moves").filter((move) => move.reason === "use" && move.deleted_at == null)).toHaveLength(1);
   });
 });

@@ -4,13 +4,16 @@ import { useFocusEffect, useRouter } from "expo-router";
 import Archive from "lucide-react-native/icons/archive";
 import Bell from "lucide-react-native/icons/bell";
 import CalendarX from "lucide-react-native/icons/calendar-x";
+import CalendarClock from "lucide-react-native/icons/calendar-clock";
 import Clock from "lucide-react-native/icons/clock";
+import FileUp from "lucide-react-native/icons/file-up";
 import House from "lucide-react-native/icons/house";
 import ListFilter from "lucide-react-native/icons/list-filter";
 import Package from "lucide-react-native/icons/package";
 import PackageMinus from "lucide-react-native/icons/package-minus";
 import PackageOpen from "lucide-react-native/icons/package-open";
 import PackageX from "lucide-react-native/icons/package-x";
+import Pill from "lucide-react-native/icons/pill";
 import Plus from "lucide-react-native/icons/plus";
 import ScanLine from "lucide-react-native/icons/scan-line";
 import RotateCcwClock from "lucide-react-native/icons/rotate-ccw-clock";
@@ -18,8 +21,9 @@ import ShoppingBasket from "lucide-react-native/icons/shopping-basket";
 import SlidersHorizontal from "lucide-react-native/icons/sliders-horizontal";
 
 import type { CabinetBox, CabinetProduct } from "../../data/cabinet";
-import { usePeople, useShownCabinet } from "../../data/hooks";
+import { useDoseAnswers, useDosePlans, useHouseholds, usePeople, useShownCabinet } from "../../data/hooks";
 import { OPENED_SOON_DAYS, SOON_DAYS, daysUntil, expiryState, formatAmount, formatDay, inView, isEmpty, isLow, lastOpenDay, localDay, matchesSearch, type BoxView, type ExpiryState } from "../../domain/boxes";
+import { dosesOfDay } from "../../domain/doses";
 import { tr } from "../../i18n/tr";
 import { canScan } from "../../services/barcode-scan";
 import { Attention } from "../../ui/attention";
@@ -29,6 +33,7 @@ import { PersonMark } from "../../ui/named-choices";
 import { useNotices } from "../../ui/notices";
 import { readCardLayout, layoutFrom, type CardLayout, type StatusCard } from "../../ui/status-cards";
 import { spacing, type, useTheme } from "../../ui/theme";
+import { FirstRunTour } from "../../ui/tour";
 
 type Held = { product: CabinetProduct; box: CabinetBox };
 
@@ -105,6 +110,9 @@ export default function Status() {
   const { palette } = useTheme();
   const cabinet = useShownCabinet();
   const people = usePeople();
+  const { shows } = useHouseholds();
+  const plans = useDosePlans().data.filter((plan) => shows(plan.cabinetId));
+  const answers = useDoseAnswers(localDay(), localDay()).data.filter((answer) => shows(answer.cabinetId));
   const { unread } = useNotices();
   const [layout, setLayout] = useState<CardLayout | null>(null);
   useFocusEffect(useCallback(() => void readCardLayout().then(setLayout, () => setLayout(layoutFrom(null))), []));
@@ -123,6 +131,7 @@ export default function Status() {
       <Screen title={tr.tabs.status}>
         <Attention />
         <EmptyState icon={House} title={tr.status.emptyTitle} hint={tr.status.emptyHint} skeleton action={<Button label={tr.cabinet.addFirst} icon={Plus} onPress={add} />} />
+        <FirstRunTour />
       </Screen>
     );
   }
@@ -176,8 +185,26 @@ export default function Status() {
     const count = home.filter(({ box }) => box.personId === person.id).length;
     return count === 0 ? [] : [{ person, count }];
   });
+  const doses = dosesOfDay(plans, answers, today, new Date());
+  // Put off, a dose is still to be answered, as the calendar says.
+  const next = doses.find((dose) => dose.state === "due" || dose.state === "upcoming" || dose.state === "snoozed");
+  const nameOf = (planId: string) => plans.find((plan) => plan.id === planId)?.name ?? "";
   const recent = [...all].sort((a, b) => b.box.updatedAt.localeCompare(a.box.updatedAt)).slice(0, RECENT);
   const cards: Record<StatusCard, ReactNode> = {
+    doses:
+      doses.length === 0
+        ? null
+        : card(tr.doses.todaySection, [
+            <ListRow
+              key="next"
+              icon={Pill}
+              iconColor={next?.state === "due" ? palette.warning : undefined}
+              title={next ? tr.doses.next(next.dueTime, nameOf(next.planId)) : tr.doses.allAnswered}
+              subtitle={tr.doses.todayCount(doses.filter((dose) => dose.state === "taken").length, doses.length)}
+              chevron
+              onPress={() => router.push("/doses")}
+            />,
+          ]),
     lists: card(tr.status.listsSection, [
       <ListRow key="buy" icon={ShoppingBasket} title={tr.toBuy.title} subtitle={tr.toBuy.count(cabinet.data.filter((product) => product.wanted).length)} chevron onPress={() => router.push("/to-buy")} />,
       ...(by.expired.length > 0
@@ -228,11 +255,16 @@ export default function Status() {
         <View style={{ gap: spacing.sm }}>
           {canScan ? <Button label={tr.addBox.scan} icon={ScanLine} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { scan: "1" } })} /> : null}
           <Button label={tr.cabinet.add} icon={Plus} variant="secondary" onPress={add} />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
+            <Button label={tr.doses.quickAdd} icon={CalendarClock} variant="ghost" size="sm" onPress={() => router.push("/dose-plan")} />
+            <Button label={tr.doses.uploadPrescription} icon={FileUp} variant="ghost" size="sm" onPress={() => router.push("/add-document")} />
+          </View>
         </View>
       </Card>
       <HomeCheck home={home} subtitle={printed} open={open} />
       {by.expired.length + by.soon.length + opened.length === 0 ? <Notice tone="success" text={tr.status.allGood} /> : null}
       {layout?.order.filter((id) => !layout.hidden.includes(id)).map((id) => <Fragment key={id}>{cards[id]}</Fragment>)}
+      <FirstRunTour />
     </Screen>
   );
 }

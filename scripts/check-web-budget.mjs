@@ -11,9 +11,9 @@ import { extname, join, relative } from "node:path";
 const root = process.argv[2] ?? "dist";
 
 const limits = {
-  entryJavaScript: 2_203_700,
-  totalJavaScript: 2_431_500,
-  totalExport: 4_385_800,
+  entryJavaScript: 2_340_500,
+  totalJavaScript: 2_596_900,
+  totalExport: 4_678_200,
   // A picture set can grow for a product reason and would otherwise hide a code regression in the total.
   pictureBytes: 58_900,
   // Exact, so adding a weight has to be a decision.
@@ -49,6 +49,9 @@ const SCANNED = new Set([".js", ".css", ".html", ".json", ".txt", ".xml", ".svg"
 const texts = await Promise.all(files
   .filter((file) => SCANNED.has(extname(file.path)))
   .map(async (file) => ({ file, body: await readFile(file.path, "utf8") })));
+// From SDK 58 the root page loads its route's chunks beside the entry, so the first visit downloads every script it names.
+const shell = texts.find(({ file }) => relative(root, file.path) === "index.html")?.body ?? "";
+const firstLoad = javaScript.filter((file) => shell.includes(`/${relative(root, file.path)}"`));
 const sourceMapReferences = texts
   .filter(({ file, body }) => [".js", ".css"].includes(extname(file.path)) && body.includes("sourceMappingURL="))
   .map(({ file }) => file);
@@ -76,7 +79,7 @@ const credentialFindings = texts.flatMap(({ file, body }) => {
 if (credentialFindings.length > 0) console.error(`Server credentials found: ${credentialFindings.join(", ")}`);
 const sum = (items) => items.reduce((total, item) => total + item.size, 0);
 const metrics = {
-  entryJavaScript: entry?.size ?? 0,
+  entryJavaScript: sum(firstLoad),
   totalJavaScript: sum(javaScript),
   totalExport: sum(files.filter((file) => !isPicture(file))),
   pictureBytes: sum(pictures),
@@ -93,8 +96,8 @@ for (const [name, value] of Object.entries(metrics)) {
   console.log(`${name}: ${value}${unit} (budget ${limit}${unit})`);
   if (value > limit) process.exitCode = 1;
 }
-if (!entry) {
-  console.error(`No Expo entry bundle found under ${relative(process.cwd(), root) || root}`);
+if (!entry || !firstLoad.includes(entry)) {
+  console.error(`No Expo entry bundle that index.html loads under ${relative(process.cwd(), root) || root}`);
   process.exitCode = 1;
 }
 // Metro's cache key ignores EXPO_PUBLIC_*, so a cache left by the E2E export silently drops sign-in and sync; --clear prevents it, this proves it.
@@ -117,10 +120,11 @@ if (entry && process.argv.includes("--require-supabase-config")) {
       console.error("EXPO_PUBLIC_SUPABASE_URL must be a bare HTTPS Supabase project origin.");
       process.exitCode = 1;
     }
-    const inlined = (await readFile(entry.path, "utf8")).includes(supabaseUrl);
+    // SDK 58 splits routes on the web, so the value lives in whichever shared chunk the client landed in.
+    const inlined = texts.some(({ file, body }) => extname(file.path) === ".js" && body.includes(supabaseUrl));
     console.log(`supabaseConfigInlined: ${inlined} (expected true)`);
     if (!inlined) {
-      console.error("Entry bundle carries no Supabase configuration. Re-export with --clear.");
+      console.error("The export carries no Supabase configuration. Re-export with --clear.");
       process.exitCode = 1;
     }
   }

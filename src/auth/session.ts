@@ -23,6 +23,7 @@ import { forgetReminderPreferences } from "../services/reminder-preferences";
 import { cancelReminders } from "../services/reminders";
 import { flushOutbox, startSyncSession, stopSyncSession } from "../sync/engine";
 import { createRecoveryClient, getSupabase, subscribeSupabaseAuthEvents } from "../sync/supabase";
+import { purgeOwnDocuments } from "../sync/documents";
 import { purgeOwnPhotos } from "../sync/photos";
 import { friendlyAuthError } from "./auth-errors";
 import { deviceName } from "../domain/logins";
@@ -453,13 +454,15 @@ export const useSession = create<SessionStore>((set, get) => ({
       const supabase = getSupabase();
       const userId = get().userId;
       if (!supabase || !userId) return tr.auth.errNotConfigured;
-      // Nothing is sent while the account is taken apart. Its photos go first,
-      // since nothing cascades to Storage; then the account, and if the server
-      // keeps it, the device keeps everything and sync sends the photos back.
+      // Nothing is sent while the account is taken apart. Its photos and
+      // documents' files go first, since nothing cascades to Storage; then the
+      // account, and if the server keeps it, the device keeps everything and
+      // sync sends the files back.
       await stopSyncSession();
       let error: { message: string } | null;
       try {
         await purgeOwnPhotos();
+        await purgeOwnDocuments(supabase);
         ({ error } = await supabase.rpc("delete_own_account"));
       } catch (failure) {
         error = { message: failure instanceof Error ? failure.message : String(failure) };
