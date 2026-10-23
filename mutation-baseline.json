@@ -201,14 +201,14 @@
       "measuredDate": "2026-10-23"
     },
     "src/domain/web-security.ts": {
-      "score": 98.11,
-      "killed": 52,
+      "score": 100,
+      "killed": 69,
       "timeout": 0,
-      "survived": 1,
+      "survived": 0,
       "noCoverage": 0,
-      "cost": 84,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "cost": 98,
+      "measuredOn": "96fbb55663daa1458bb046b9d82a52e5ff74f9bc",
+      "measuredDate": "2026-10-23"
     },
     "src/services/barcode-scan.native.ts": {
       "score": 100,
@@ -319,6 +319,16 @@
       "cost": 9206,
       "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
+    },
+    "src/sync/live.ts": {
+      "score": 93.22,
+      "killed": 55,
+      "timeout": 0,
+      "survived": 4,
+      "noCoverage": 0,
+      "cost": 1408,
+      "measuredOn": "96fbb55663daa1458bb046b9d82a52e5ff74f9bc",
+      "measuredDate": "2026-10-23"
     },
     "src/sync/merge-policy.ts": {
       "score": 92.14,
