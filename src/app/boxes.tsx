@@ -26,7 +26,7 @@ export default function BoxesScreen() {
   const people = usePeople();
   const locations = useLocations();
   const boxes = cabinet.data.flatMap((product) => product.boxes).filter((box) => ids.includes(box.id));
-  // A name added here goes where the chosen boxes are; boxes of two cabinets share no person or place.
+  // A name chosen or added here is one of the chosen boxes' cabinet; boxes of two cabinets share no person or place, so none is offered.
   const cabinets = new Set(boxes.map((box) => box.cabinetId));
   const cabinetId = cabinets.size === 1 ? [...cabinets][0]! : null;
   // A tile is lit only when every chosen box already has it.
@@ -54,11 +54,11 @@ export default function BoxesScreen() {
   return (
     <Screen back="/cabinet" title={tr.selection.title(ids.length)}>
       <Body muted style={{ marginBottom: spacing.md }}>{tr.selection.hint}</Body>
-      <NamedChoices table="people" title={tr.selection.whose} named={people.data} chosen={shared("personId")} onChoose={(personId) => void change({ personId })} onAdd={(name) => addAndChoose("people", name)} />
+      <NamedChoices table="people" title={tr.selection.whose} named={people.data.filter((person) => person.cabinetId === cabinetId)} chosen={shared("personId")} onChoose={(personId) => void change({ personId })} onAdd={(name) => addAndChoose("people", name)} />
       <NamedChoices
         table="locations"
         title={tr.selection.where}
-        named={locations.data}
+        named={locations.data.filter((place) => place.cabinetId === cabinetId)}
         chosen={shared("locationId")}
         onChoose={(locationId) => void change({ locationId })}
         onAdd={(name) => addAndChoose("locations", name)}

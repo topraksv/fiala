@@ -278,7 +278,7 @@ function Filter({
   table: NamedTable;
   named: readonly Named[];
   /** Tiles before the names, that no name edit reaches. */
-  first?: readonly Named[];
+  first?: readonly Pick<Named, "id" | "name">[];
   chosen: string | null;
   onChoose: (id: string | null) => void;
 }) {

@@ -1148,6 +1148,25 @@ describe("a shared cabinet", () => {
       expect(count(devices.A, `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = '${HOUSE}'`), table).toBe(0);
     }
     expect(count(devices.A, "SELECT COUNT(*) AS n FROM outbox") + count(devices.A, "SELECT COUNT(*) AS n FROM sync_dead_letters"), "nothing waits for a cabinet the server will not take it into").toBe(0);
+    expect(count(devices.A, "SELECT COUNT(*) AS n FROM sync_state WHERE table_name LIKE 'cabinet:%'"), "nor any mark of having fetched it").toBe(0);
+  });
+
+  it("fetches the cabinet whole again for a person removed and let back in between two syncs", async () => {
+    const { box } = await joined();
+    await on("A", sync);
+    await on("C", async () => {
+      await takeFrom(box, 5000);
+      await sync();
+    });
+    // While A was out, a pull passed C's use unseen; A's own removal it never saw.
+    devices.A.prepare("UPDATE sync_state SET last_pulled_at = '2099-01-01T00:00:00.000000+00:00|ffffffff-ffff-4fff-bfff-ffffffffffff' WHERE table_name = 'package_moves'").run();
+    const member = cloud.tables.get("cabinet_members")!.get("0190a000-0000-7000-8000-00000000b0b2")!;
+    cloud.tables.get("cabinet_members")!.set(String(member.id), { ...member, deleted_at: null, tombstone_version: 1, updated_at: "2031-01-01T00:00:00.000000+00:00" });
+    await on("A", async () => {
+      await sync();
+      expect(await remainingMilli(box)).toBe(195_000);
+    });
+    expect(devices.A.prepare("SELECT table_name FROM sync_state WHERE table_name LIKE 'cabinet:%'").all(), "one mark a cabinet").toEqual([{ table_name: `cabinet:${HOUSE}@1` }]);
   });
 
   it("lets a viewer read the household and sends none of its writes", async () => {

@@ -7,7 +7,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(42);
+select extensions.plan(49);
 
 create function pg_temp.exec_sqlstate(command text)
 returns text
@@ -47,11 +47,15 @@ select is(
   0::bigint,
   'no client role reads or writes an invitation'
 );
-select ok(
-  not has_function_privilege('anon', 'public.accept_cabinet_invite(text, text)', 'execute')
-  and not has_function_privilege('anon', 'public.peek_cabinet_invite(text)', 'execute')
-  and not has_function_privilege('anon', 'definers.accept_cabinet_invite(text, text)', 'execute'),
-  'signed out, nobody calls the invitation functions'
+select is(
+  (select array_agg(n.nspname || '.' || p.proname order by n.nspname, p.proname)
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname in ('public', 'definers')
+      and p.proname in ('create_cabinet_invite', 'cancel_cabinet_invites', 'peek_cabinet_invite', 'accept_cabinet_invite',
+                        'offer_cabinet', 'cabinet_offers', 'answer_cabinet_offer')
+      and has_function_privilege('anon', p.oid, 'execute')),
+  null,
+  'signed out, nobody calls any of the invitation functions'
 );
 
 -- A, the owner.
@@ -80,7 +84,7 @@ select is(
 );
 insert into tokens values ('B', public.create_cabinet_invite('c0000000-0000-7000-8000-00000000000c', 'editor', 'Ömer'));
 insert into tokens values ('C', public.create_cabinet_invite('c0000000-0000-7000-8000-00000000000c', 'viewer', 'Ömer'));
-select ok((select bool_and(token ~ '^[0-9a-f]{64}$') from tokens), 'a link''s token is 256 random bits, as hex');
+select ok((select bool_and(token ~ '^[0-9a-f]{64}$') from tokens), 'a link''s token is two random UUIDs, as hex');
 select is(
   (select name from public.cabinet_members where user_id = '10000000-0000-4000-8000-000000000001'),
   'Ömer',
@@ -165,6 +169,7 @@ set local role postgres;
 update public.cabinet_invites set expires_at = now() - interval '1 second';
 select pg_temp.as_user('40000000-0000-4000-8000-000000000004');
 set local role authenticated;
+select is((select count(*) from public.peek_cabinet_invite((select token from tokens where who = 'late'))), 0::bigint, 'a link past its seven days shows nothing');
 select is(
   pg_temp.exec_sqlstate($$select public.accept_cabinet_invite((select token from tokens where who = 'late'), 'Deniz')$$),
   '22023',
@@ -174,6 +179,8 @@ select is((select count(*) from public.cabinet_members where user_id = '40000000
 
 select pg_temp.as_user('10000000-0000-4000-8000-000000000001');
 set local role authenticated;
+update public.cabinet_members set role = 'owner' where user_id = '30000000-0000-4000-8000-000000000003';
+select is((select role from public.cabinet_members where user_id = '30000000-0000-4000-8000-000000000003'), 'viewer', 'a household has one owner: nobody is raised to it');
 insert into tokens values ('D1', public.create_cabinet_invite('c0000000-0000-7000-8000-00000000000c', 'editor', 'Ömer'));
 insert into tokens values ('D2', public.create_cabinet_invite('c0000000-0000-7000-8000-00000000000c', 'viewer', 'Ömer'));
 select pg_temp.as_user('20000000-0000-4000-8000-000000000002');
@@ -219,8 +226,15 @@ select is(
   '22023',
   'nor can answer it'
 );
+select is(
+  pg_temp.exec_sqlstate($$select public.offer_cabinet('c0000000-0000-7000-8000-00000000000c', '40000000-0000-4000-8000-000000000004', 'editor', 'Eda')$$),
+  '42501',
+  'a member offers no one the household'
+);
+select public.offer_cabinet('c0000000-0000-7000-8000-0000000000cc', '30000000-0000-4000-8000-000000000003', null, 'Eda');
 
 select pg_temp.as_user('30000000-0000-4000-8000-000000000003');
+select is((select count(*) from public.cabinet_offers()), 1::bigint, 'nor withdraws another''s offer');
 select isnt((select max_id from public.sync_cursors() where table_name = 'offers'), null, 'the change probe tells C an offer waits');
 select is(public.answer_cabinet_offer('c0000000-0000-7000-8000-0000000000cc', false, 'Can'), null, 'C declines');
 select is((select count(*) from public.cabinet_offers()), 0::bigint, 'and the offer is gone, leaving no record');
@@ -256,13 +270,27 @@ select is(
   'a removed member let in again is a member again, at the new role'
 );
 
--- A deleted household invites no one.
+-- A deleted household invites no one, and what it sent leads nowhere.
 select pg_temp.as_user('10000000-0000-4000-8000-000000000001');
+insert into tokens values ('gone', public.create_cabinet_invite('c0000000-0000-7000-8000-0000000000cc', 'editor', 'Ömer'));
+select public.offer_cabinet('c0000000-0000-7000-8000-0000000000cc', '20000000-0000-4000-8000-000000000002', 'editor', 'Ömer');
 update public.cabinets set deleted_at = now(), tombstone_version = 1 where id = 'c0000000-0000-7000-8000-0000000000cc';
 select is(
   pg_temp.exec_sqlstate($$select public.create_cabinet_invite('c0000000-0000-7000-8000-0000000000cc', 'editor', 'Ömer')$$),
   '42501',
   'a deleted household invites no one'
+);
+select pg_temp.as_user('20000000-0000-4000-8000-000000000002');
+select is((select count(*) from public.peek_cabinet_invite((select token from tokens where who = 'gone'))), 0::bigint, 'its link shows nothing');
+select is(
+  pg_temp.exec_sqlstate($$select public.accept_cabinet_invite((select token from tokens where who = 'gone'), 'Eda')$$),
+  '22023',
+  'nor lets anyone in'
+);
+select is(
+  pg_temp.exec_sqlstate($$select public.answer_cabinet_offer('c0000000-0000-7000-8000-0000000000cc', true, 'Eda')$$),
+  '22023',
+  'nor does its offer'
 );
 
 select * from extensions.finish();

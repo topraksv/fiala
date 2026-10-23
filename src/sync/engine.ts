@@ -482,22 +482,29 @@ async function followMemberships(supabase: SupabaseClient, userId: string, token
     await sweepMemberships(sqlite, supabase, userId, token);
     membershipsSweptFor = userId;
   }
-  const mine = await sqlite.getAllAsync<{ cabinet_id: string; deleted_at: string | null }>(
-    "SELECT cabinet_id, deleted_at FROM cabinet_members WHERE user_id = ? AND role <> 'owner'",
+  const mine = await sqlite.getAllAsync<{ cabinet_id: string; deleted_at: string | null; tombstone_version: number }>(
+    "SELECT cabinet_id, deleted_at, tombstone_version FROM cabinet_members WHERE user_id = ? AND role <> 'owner'",
     [userId],
   );
   const fetched = new Set(
     (await sqlite.getAllAsync<{ table_name: string }>("SELECT table_name FROM sync_state WHERE table_name LIKE ?", [`${FETCHED}%`])).map((row) => row.table_name),
   );
-  for (const { cabinet_id: cabinet, deleted_at: left } of mine) {
+  for (const { cabinet_id: cabinet, deleted_at: left, tombstone_version: generation } of mine) {
     assertActive(token);
+    // A removal raises the membership's generation and a return keeps it, so a
+    // person removed and let back in between two syncs, whose cursors passed
+    // what changed while they were out, fetches the cabinet whole again.
+    const key = `${FETCHED}${cabinet}@${generation}`;
     if (left) {
       await forgetCabinet(sqlite, cabinet);
-    } else if (!fetched.has(FETCHED + cabinet)) {
+    } else if (!fetched.has(key)) {
       const tables = CABINET_SCOPED.map(([table]) => table);
       const pages = prefetch(tables, () => FROM_START, supabase, token, cabinet);
       for (const table of tables) await pullTable(supabase, table, FROM_START, userId, token, pages.get(table)!, cabinet);
-      await sqlite.runAsync("INSERT OR REPLACE INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [FETCHED + cabinet, nowIso()]);
+      await withTransaction(async () => {
+        await sqlite.runAsync("DELETE FROM sync_state WHERE table_name LIKE ?", [`${FETCHED}${cabinet}@%`]);
+        await sqlite.runAsync("INSERT INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [key, nowIso()]);
+      });
     }
   }
 }
@@ -537,7 +544,7 @@ function forgetCabinet(sqlite: LocalDatabase, cabinet: string): Promise<void> {
         await sqlite.runAsync(`DELETE FROM ${queue} WHERE table_name = ? AND json_extract(payload, '$.${column}') = ?`, [table, cabinet]);
       }
     }
-    await sqlite.runAsync("DELETE FROM sync_state WHERE table_name = ?", [FETCHED + cabinet]);
+    await sqlite.runAsync("DELETE FROM sync_state WHERE table_name LIKE ?", [`${FETCHED}${cabinet}@%`]);
   });
 }
 

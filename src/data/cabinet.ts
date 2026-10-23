@@ -57,19 +57,20 @@ function assertAmount(milli: number, allowZero: boolean): void {
  * joins the first one's product, and one deleted comes back with what was
  * reviewed now; without a GTIN, each add is a product of its own.
  */
-async function productWrite(cabinetId: string, product: ProductFields | { id: string }): Promise<{ id: string; writes: RowWrite[] }> {
+async function productWrite(cabinetId: string, product: ProductFields | { id: string }): Promise<{ id: string; cabinetId: string; writes: RowWrite[] }> {
   // Another box of a product already held: only a delete made meanwhile on another device needs undoing, and editRow writes nothing otherwise.
+  // The box goes where its product is, which may be a household rather than the cabinet asked for.
   if ("id" in product) {
     const held = await findRow("products", product.id);
     if (!held) throw new Error(`no product ${product.id}`);
-    return { id: product.id, writes: editRow("products", held, { deletedAt: null }) };
+    return { id: product.id, cabinetId: String(held.cabinet_id), writes: editRow("products", held, { deletedAt: null }) };
   }
   const gtin = product.gtin || null;
   const id = gtin ? await deterministicId(naturalKeys.product(cabinetId, gtin)) : uuidv7();
   const there = gtin ? await findRow("products", id) : null;
-  if (there && there.deleted_at == null) return { id, writes: [] };
+  if (there && there.deleted_at == null) return { id, cabinetId, writes: [] };
   const row = { cabinetId, ...product, gtin, deletedAt: null };
-  return { id, writes: there ? editRow("products", there, row) : [{ table: "products", row: { id, ...row } }] };
+  return { id, cabinetId, writes: there ? editRow("products", there, row) : [{ table: "products", row: { id, ...row } }] };
 }
 
 /** Add a box of `product`, or of the held product with that id, holding `amountMilli`, in one write; its id is returned. */
@@ -77,9 +78,9 @@ export async function addPackage(cabinetId: string, product: ProductFields | { i
   assertAmount(amountMilli, true);
   const packageId = uuidv7();
   await writeRows(async () => {
-    const { id: productId, writes } = await productWrite(cabinetId, product);
-    writes.push({ table: "packages", row: { id: packageId, cabinetId, productId, ...box } });
-    if (amountMilli > 0) writes.push(moveWrite(cabinetId, packageId, amountMilli, "initial"));
+    const { id: productId, cabinetId: there, writes } = await productWrite(cabinetId, product);
+    writes.push({ table: "packages", row: { id: packageId, cabinetId: there, productId, ...box } });
+    if (amountMilli > 0) writes.push(moveWrite(there, packageId, amountMilli, "initial"));
     return writes;
   });
   return packageId;
@@ -95,7 +96,9 @@ export async function importBoxes(cabinetId: string, boxes: readonly ImportedBox
   const written = await writeUndoable(async () => {
     const writes: RowWrite[] = [];
     const named = { people: new Map<string, string>(), locations: new Map<string, string>() };
-    for (const table of ["people", "locations"] as const) for (const { id, name } of await readNamed(table)) named[table].set(foldName(name), id);
+    for (const table of ["people", "locations"] as const) {
+      for (const { id, name, cabinetId: there } of await readNamed(table)) if (there === cabinetId) named[table].set(foldName(name), id);
+    }
     const idOf = (table: "people" | "locations", name: string | null) => {
       if (!name) return null;
       const known = named[table].get(foldName(name));
@@ -363,15 +366,17 @@ export async function tagProduct(productId: string, tagId: string, on: boolean):
 
 export type NamedTable = "people" | "locations" | "tags";
 
+/** A row names only what is in its own cabinet: a picker shows those whose `cabinetId` is the row's. */
 export interface Named {
   id: string;
   name: string;
+  cabinetId: string;
 }
 
 /** The people or the places a box can be given, or the tags a product can, by name. */
 export async function readNamed(table: NamedTable): Promise<Named[]> {
   const sqlite = await getSqliteAsync();
-  const rows = await sqlite.getAllAsync<Named>(`SELECT id, name FROM ${table} WHERE deleted_at IS NULL`);
+  const rows = await sqlite.getAllAsync<Named>(`SELECT id, name, cabinet_id AS cabinetId FROM ${table} WHERE deleted_at IS NULL`);
   return rows.sort((a, b) => a.name.localeCompare(b.name, "tr"));
 }
 
@@ -386,7 +391,7 @@ export interface Person extends Named {
 export async function readPeople(): Promise<Person[]> {
   const sqlite = await getSqliteAsync();
   const rows = await sqlite.getAllAsync<Person>(
-    `SELECT id, name, color, warn_days AS warnDays, photo_id AS photoId, (SELECT thumb FROM photos WHERE id = photo_id) AS thumb
+    `SELECT id, name, cabinet_id AS cabinetId, color, warn_days AS warnDays, photo_id AS photoId, (SELECT thumb FROM photos WHERE id = photo_id) AS thumb
        FROM people WHERE deleted_at IS NULL`,
   );
   return rows.sort((a, b) => a.name.localeCompare(b.name, "tr"));

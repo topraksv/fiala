@@ -268,7 +268,12 @@ export class FakeCloud {
   private offersHash(uid: string): string | null {
     const mine = [...this.offers.values()].filter((offer) => offer.to === uid && this.isLive(offer.cabinet));
     if (mine.length === 0) return null;
-    const hex = createHash("md5").update(mine.map((offer) => `${offer.cabinet}:${offer.role}`).sort().join(",")).digest("hex");
+    const shown = (offer: { cabinet: string; role: string }) => {
+      const row = this.tables.get("cabinets")!.get(offer.cabinet)!;
+      const owner = this.rows("cabinet_members").find((member) => member.cabinet_id === offer.cabinet && member.user_id === row.owner_id);
+      return `${offer.cabinet}:${offer.role}:${String(row.name)}:${String(owner?.name ?? "")}`;
+    };
+    const hex = createHash("md5").update(mine.map(shown).sort().join(",")).digest("hex");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
@@ -304,8 +309,9 @@ export class FakeCloud {
     }
     if (name === "accept_cabinet_invite") {
       const invite = this.invites.get(String(args.token));
-      this.invites.delete(String(args.token));
+      // The refusal rolls the delete back, so a link refused stays where it was.
       if (!invite || !this.isLive(invite.cabinet)) return invalid("invite not found");
+      this.invites.delete(String(args.token));
       this.admit(invite.cabinet, invite.role, uid, args.member_name);
       return ok(invite.cabinet);
     }

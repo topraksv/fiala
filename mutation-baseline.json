@@ -40,6 +40,16 @@
       "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
       "measuredDate": "2026-10-22"
     },
+    "src/data/cabinet.ts": {
+      "score": 100,
+      "killed": 293,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 8887,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
+    },
     "src/data/live-query.ts": {
       "score": 94.17,
       "killed": 95,
@@ -49,6 +59,16 @@
       "cost": 1071,
       "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
       "measuredDate": "2026-10-22"
+    },
+    "src/data/photos.ts": {
+      "score": 100,
+      "killed": 23,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 1410,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
     },
     "src/data/reset.ts": {
       "score": 100,
@@ -110,6 +130,16 @@
       "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
     },
+    "src/domain/boxes.ts": {
+      "score": 100,
+      "killed": 502,
+      "timeout": 9,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 12361,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
+    },
     "src/domain/dates.ts": {
       "score": 100,
       "killed": 17,
@@ -129,6 +159,16 @@
       "cost": 79,
       "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
       "measuredDate": "2026-10-22"
+    },
+    "src/domain/import.ts": {
+      "score": 100,
+      "killed": 334,
+      "timeout": 2,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 1677,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
     },
     "src/domain/logins.ts": {
       "score": 94.95,
@@ -150,6 +190,16 @@
       "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
       "measuredDate": "2026-10-22"
     },
+    "src/domain/reminders.ts": {
+      "score": 100,
+      "killed": 136,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 2386,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
+    },
     "src/domain/web-security.ts": {
       "score": 98.11,
       "killed": 52,
@@ -159,6 +209,26 @@
       "cost": 84,
       "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
       "measuredDate": "2026-10-22"
+    },
+    "src/services/barcode-scan.native.ts": {
+      "score": 100,
+      "killed": 22,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 1653,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
+    },
+    "src/services/barcode-scan.ts": {
+      "score": 100,
+      "killed": 4,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 12,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
     },
     "src/services/feedback.ts": {
       "score": 88.57,
@@ -179,6 +249,46 @@
       "cost": 174,
       "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
       "measuredDate": "2026-10-22"
+    },
+    "src/services/picked-file.ts": {
+      "score": 93.29,
+      "killed": 136,
+      "timeout": 3,
+      "survived": 10,
+      "noCoverage": 0,
+      "cost": 1061,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
+    },
+    "src/services/reminder-preferences.ts": {
+      "score": 100,
+      "killed": 37,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 631,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
+    },
+    "src/services/reminders.native.ts": {
+      "score": 100,
+      "killed": 87,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 913,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
+    },
+    "src/services/reminders.ts": {
+      "score": 100,
+      "killed": 4,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 60,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
     },
     "src/services/share.ts": {
       "score": 100,
@@ -220,6 +330,16 @@
       "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
     },
+    "src/sync/photos.ts": {
+      "score": 90.91,
+      "killed": 146,
+      "timeout": 4,
+      "survived": 14,
+      "noCoverage": 1,
+      "cost": 6959,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
+    },
     "src/sync/rows.ts": {
       "score": 86,
       "killed": 86,
@@ -249,6 +369,16 @@
       "cost": 1151,
       "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
       "measuredDate": "2026-10-22"
+    },
+    "src/sync/sharing.ts": {
+      "score": 100,
+      "killed": 119,
+      "timeout": 0,
+      "survived": 0,
+      "noCoverage": 0,
+      "cost": 7049,
+      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
+      "measuredDate": "2026-10-23"
     },
     "src/sync/status.ts": {
       "score": 90,

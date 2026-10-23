@@ -48,8 +48,9 @@ export default function ProductScreen() {
   const router = useRouter();
   const cabinet = useCabinet();
   const people = usePeople();
-  const tags = useTags();
+  const allTags = useTags();
   const product = cabinet.data.find((each) => each.id === id);
+  const tags = allTags.data.filter((tag) => tag.cabinetId === product?.cabinetId);
 
   if (!product) {
     return (
@@ -138,9 +139,9 @@ export default function ProductScreen() {
       </View>
 
       <SectionHeader>{tr.product.tagsSection}</SectionHeader>
-      {tags.data.length > 0 ? (
+      {tags.length > 0 ? (
         <Card rows>
-          {tags.data.map((tag) => {
+          {tags.map((tag) => {
             const on = product.tagIds.includes(tag.id);
             return <ListRow key={tag.id} icon={Tag} title={tag.name} selected={on} onPress={() => void attempt(() => tagProduct(product.id, tag.id, !on))} />;
           })}

@@ -274,10 +274,10 @@ export default function BoxScreen() {
         ))}
       </Card>
 
-      <NamedChoices table="people" named={people.data} chosen={box.personId} onChoose={(personId) => void attempt(() => editBoxes([box.id], { personId }))} onAdd={(name) => addChoice("people", name)} />
+      <NamedChoices table="people" named={people.data.filter((person) => person.cabinetId === box.cabinetId)} chosen={box.personId} onChoose={(personId) => void attempt(() => editBoxes([box.id], { personId }))} onAdd={(name) => addChoice("people", name)} />
       <NamedChoices
         table="locations"
-        named={locations.data}
+        named={locations.data.filter((place) => place.cabinetId === box.cabinetId)}
         chosen={box.locationId}
         onChoose={(locationId) => void attempt(() => editBoxes([box.id], { locationId }))}
         onAdd={(name) => addChoice("locations", name)}

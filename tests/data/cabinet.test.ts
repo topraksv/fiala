@@ -173,6 +173,9 @@ describe("what a box holds", () => {
     await tagProduct(productId, "pain", true);
     expect(all(`SELECT DISTINCT cabinet_id FROM package_moves WHERE package_id = '${house}'`)).toEqual([{ cabinet_id: "house" }]);
     expect(all("SELECT cabinet_id FROM product_tags")).toEqual([{ cabinet_id: "house" }]);
+    const another = await addPackage("me", { id: productId }, { unit: "tablet" }, 1000);
+    expect(all(`SELECT DISTINCT cabinet_id FROM package_moves WHERE package_id = '${another}'`), "another box of it goes where the product is").toEqual([{ cabinet_id: "house" }]);
+    expect(all(`SELECT cabinet_id FROM packages WHERE id = '${another}'`)).toEqual([{ cabinet_id: "house" }]);
     for (const write of [takeFrom, addTo, correctTo]) await expect(write("none", 1000)).rejects.toThrow("packages: no such row");
     await expect(tagProduct("none", "pain", true)).rejects.toThrow("products: no such row");
   });
@@ -349,20 +352,20 @@ describe("people and places", () => {
     expect((await readNamed("people")).map((person) => person.name)).toEqual(["Ali", "Zeynep"]);
     expect(all("SELECT cabinet_id, kind FROM people WHERE id = '" + zeynep + "'")).toEqual([{ cabinet_id: "me", kind: "person" }]);
     await deleteRows("people", [zeynep]);
-    expect(await readNamed("people")).toEqual([{ id: expect.any(String), name: "Ali" }]);
-    expect(await readNamed("locations")).toEqual([{ id: expect.any(String), name: "Mutfak" }]);
+    expect(await readNamed("people")).toEqual([{ id: expect.any(String), name: "Ali", cabinetId: "me" }]);
+    expect(await readNamed("locations")).toEqual([{ id: expect.any(String), name: "Mutfak", cabinetId: "me" }]);
   });
 
   it("are told apart by a colour, and give their boxes their own notice ahead of an expiry", async () => {
     const zeynep = await addNamed("people", "me", "Zeynep");
     await addNamed("people", "me", "Ali");
     expect(await readPeople()).toEqual([
-      { id: expect.any(String), name: "Ali", color: null, warnDays: null, photoId: null, thumb: null },
-      { id: zeynep, name: "Zeynep", color: null, warnDays: null, photoId: null, thumb: null },
+      { id: expect.any(String), name: "Ali", cabinetId: "me", color: null, warnDays: null, photoId: null, thumb: null },
+      { id: zeynep, name: "Zeynep", cabinetId: "me", color: null, warnDays: null, photoId: null, thumb: null },
     ]);
     await editPerson(zeynep, { color: "teal", warnDays: 90 });
     await setPhoto("people", zeynep, PHOTO);
-    expect((await readPeople())[1]).toEqual({ id: zeynep, name: "Zeynep", color: "teal", warnDays: 90, photoId: expect.any(String), thumb: PHOTO.thumb });
+    expect((await readPeople())[1]).toEqual({ id: zeynep, name: "Zeynep", cabinetId: "me", color: "teal", warnDays: 90, photoId: expect.any(String), thumb: PHOTO.thumb });
     const hers = await addPackage("me", PAROL, { unit: "tablet", personId: zeynep }, 1000);
     const own = await addPackage("me", PAROL, { unit: "tablet", personId: zeynep, warnDays: 7 }, 1000);
     const nobody = await addPackage("me", PAROL, { unit: "tablet" }, 1000);
@@ -379,7 +382,7 @@ describe("people and places", () => {
     const kitchen = await addNamed("locations", "me", "Mutfak");
     harness.db!.exec("DELETE FROM outbox");
     await renameNamed("locations", kitchen, "Banyo dolabı");
-    expect(await readNamed("locations")).toEqual([{ id: kitchen, name: "Banyo dolabı" }]);
+    expect(await readNamed("locations")).toEqual([{ id: kitchen, name: "Banyo dolabı", cabinetId: "me" }]);
     expect(outbox()).toEqual(["locations"]);
     await deleteRows("locations", [kitchen]);
     harness.db!.exec("DELETE FROM outbox");
@@ -442,6 +445,7 @@ describe("a file's boxes", () => {
 
   it("are added in one write, a name met again found, not made twice, and taken back whole", async () => {
     const zeynep = await addNamed("people", "me", "Zeynep");
+    const houseKitchen = await addNamed("locations", "house", "Mutfak");
     const written = await importBoxes("me", [
       imported("Parol", "08699546090112", 20_000, "ZEYNEP", "Mutfak"),
       imported("Parol", "08699546090112", 10_000, "Ali", " mutfak "),
@@ -456,15 +460,16 @@ describe("a file's boxes", () => {
     const ali = (await readNamed("people")).find((person) => person.name === "Ali")!.id;
     expect(parol.boxes.map((box) => box.personId).sort()).toEqual([ali, zeynep].sort());
     expect(new Set(parol.boxes.map((box) => box.locationId)).size, "the place is made once").toBe(1);
-    expect(await readNamed("locations")).toEqual([{ id: parol.boxes[0]!.locationId, name: "Mutfak" }]);
+    expect(parol.boxes[0]!.locationId, "a place of another cabinet is not this one's").not.toBe(houseKitchen);
+    expect((await readNamed("locations")).filter((place) => place.cabinetId === "me")).toEqual([{ id: parol.boxes[0]!.locationId, name: "Mutfak", cabinetId: "me" }]);
     expect(parol.boxes.map((box) => [box.remainingMilli, box.counted]).sort((a, b) => Number(a[0]) - Number(b[0]))).toEqual([[10_000, true], [20_000, true]]);
     expect(cabinet.find((product) => product.name === "Majezik")!.boxes.map((box) => [box.remainingMilli, box.counted]).sort((a, b) => Number(a[0]) - Number(b[0]))).toEqual([[0, false], [5000, true]]);
     expect(all("SELECT reason, COUNT(*) AS n FROM package_moves GROUP BY reason")).toEqual([{ reason: "initial", n: 5 }]);
 
     await undoRows(written!);
     expect(await readCabinet()).toEqual([]);
-    expect(await readNamed("people"), "a name the cabinet held before stays").toEqual([{ id: zeynep, name: "Zeynep" }]);
-    expect(await readNamed("locations")).toEqual([]);
+    expect(await readNamed("people"), "a name the cabinet held before stays").toEqual([{ id: zeynep, name: "Zeynep", cabinetId: "me" }]);
+    expect(await readNamed("locations")).toEqual([{ id: houseKitchen, name: "Mutfak", cabinetId: "house" }]);
   });
 
   it("join a product the cabinet holds by its GTIN, and bring back one deleted", async () => {
