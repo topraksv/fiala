@@ -15,7 +15,7 @@ import { DOCUMENT_KINDS } from "../db/schema";
 import { useDocuments, usePeople } from "../data/hooks";
 import { formatDay } from "../domain/boxes";
 import { tr } from "../i18n/tr";
-import { Button, Card, ChoiceTile, ListRow, rowsOf, SectionHeader } from "./components";
+import { Button, Card, ChoiceTile, ListRow, rowsOf, useTileColumns, SectionHeader } from "./components";
 import { radioGroupKeys } from "./keys";
 import { controlSize, spacing } from "./theme";
 
@@ -71,9 +71,10 @@ export function LinkedDocuments({ target, editable }: { target: { package: strin
 
 /** One choice of a few, three tiles to a row: a document's kind, or a filter. */
 export function Tiles<T extends string | null>({ label, options, chosen, onChoose }: { label: string; options: readonly { id: T; name: string }[]; chosen: T; onChoose: (id: T) => void }) {
+  const columns = useTileColumns(3);
   return (
     <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={label} style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-      {rowsOf(options, 3).map((row, at) => (
+      {rowsOf(options, columns).map((row, at) => (
         <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
           {row.map((option) => (
             <ChoiceTile key={option.id ?? "all"} label={option.name} selected={chosen === option.id} minHeight={controlSize.minimumTarget} onPress={() => onChoose(option.id)} />

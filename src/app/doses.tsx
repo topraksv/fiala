@@ -22,11 +22,12 @@ import { undoRows } from "../db/mutations";
 import { formatDay, localDay } from "../domain/boxes";
 import { dosesOfDay, shiftDay, weekdayOf, type DayDose } from "../domain/doses";
 import { tr } from "../i18n/tr";
-import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, Screen, SectionHeader } from "../ui/components";
+import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, Screen, SectionHeader, useTileColumns } from "../ui/components";
 import { appError } from "../ui/dialog";
 import { doseAmount, PlanRows } from "../ui/doses";
 import { Tiles } from "../ui/documents";
 import { radioGroupKeys } from "../ui/keys";
+import { WEEKDAY_TILE_WIDTH } from "../ui/responsive";
 import { useWriter } from "../ui/named-choices";
 import { controlSize, spacing, useTheme } from "../ui/theme";
 import { showUndo } from "../ui/undo";
@@ -34,9 +35,13 @@ import { showUndo } from "../ui/undo";
 const ANSWERS: readonly DoseStatus[] = ["taken", "skipped", "snoozed", "missed"];
 
 /** The Monday of a day's week. */
+/** Days by their place in the week, Monday first. */
+const WEEK = tr.doses.weekdays.map((_, at) => at);
 const mondayOf = (day: string) => shiftDay(day, -Math.log2(weekdayOf(day)));
 
 export default function Doses() {
+  // A week that will not fit one row splits four and three, never six and one.
+  const weekColumns = useTileColumns(7, WEEKDAY_TILE_WIDTH) < 7 ? 4 : 7;
   const router = useRouter();
   const today = localDay();
   const [day, setDay] = useState(today);
@@ -73,7 +78,7 @@ export default function Doses() {
   const doses = dosesOfDay(theirs(shown), theirs(answered), day, new Date());
   const answer = async (dose: DayDose, status: DoseStatus | null) => {
     try {
-      const written = await answerDose(dose.planId, dose, status);
+      const written = await answerDose(dose.planId, dose, status, { writes });
       if (written.writes.length > 0) showUndo(status ? tr.doses.answered(tr.doses.states[status]) : tr.doses.cleared, () => undoRows(written));
     } catch {
       await appError(tr.errors.saveFailed);
@@ -87,20 +92,29 @@ export default function Doses() {
         <Body style={{ flex: 1, textAlign: "center" }}>{tr.common.joined(formatDay(monday), formatDay(shiftDay(monday, 6)))}</Body>
         <IconButton icon={ChevronRight} label={tr.doses.nextWeek} onPress={() => setDay(shiftDay(day, 7))} />
       </View>
-      <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.doses.title} style={{ flexDirection: "row", gap: spacing.xs, marginBottom: spacing.sm }}>
-        {tr.doses.weekdays.map((short, at) => {
-          const each = shiftDay(monday, at);
-          return (
-            <ChoiceTile
-              key={each}
-              label={`${short}\n${Number(each.slice(8))}`}
-              accessibilityLabel={tr.common.joined(tr.doses.weekdayNames[at], formatDay(each), each === today ? tr.doses.today : undefined)}
-              selected={each === day}
-              minHeight={controlSize.minimumTarget}
-              onPress={() => setDay(each)}
-            />
-          );
-        })}
+      <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.doses.title} style={{ gap: spacing.xs, marginBottom: spacing.sm }}>
+        {rowsOf(WEEK, weekColumns).map((row, line) => (
+          <View key={line} style={{ flexDirection: "row", gap: spacing.xs }}>
+            {row.map((at) => {
+              const each = shiftDay(monday, at);
+              const short = tr.doses.weekdays[at];
+              return (
+                <ChoiceTile
+                  key={each}
+                  label={`${short}\n${Number(each.slice(8))}`}
+                  accessibilityLabel={tr.common.joined(tr.doses.weekdayNames[at], formatDay(each), each === today ? tr.doses.today : undefined)}
+                  selected={each === day}
+                  minHeight={controlSize.minimumTarget}
+                  onPress={() => setDay(each)}
+                />
+              );
+            })}
+            {/* An empty cell keeps the short row's days as wide as the long row's. */}
+            {Array.from({ length: weekColumns - row.length }, (_, cell) => (
+              <View key={cell} style={{ flexGrow: 1, flexBasis: 0 }} />
+            ))}
+          </View>
+        ))}
       </View>
       {day !== today ? (
         <View style={{ alignItems: "flex-start", marginBottom: spacing.sm }}>

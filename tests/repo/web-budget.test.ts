@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { appStoreMajor, appVersionOf, entryOf, greenRun, openRuns, otaRecord, titleOf } from "../../scripts/check-published.mjs";
+import { catalogueRows, gtinOf, newestList } from "../../scripts/import-catalogue.mjs";
 
 const root = join(import.meta.dirname, "../..");
 
@@ -156,12 +157,24 @@ describe("web release budget", () => {
     expect(result.stderr).toContain("Public source-map references found");
   });
 
+  // SDK 58 renders +html.tsx through React: a root that drops the server
+  // document's nodes exports a page that never boots.
+  it("rejects an index.html that does not load the entry bundle", () => {
+    const { root } = fixture();
+    writeFileSync(join(root, "index.html"), '<div id="root"></div>');
+    const result = check(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("No Expo entry bundle that index.html loads");
+  });
+
   // Metro's transform cache is shared by `expo export` and `eas update` and its
   // key ignores EXPO_PUBLIC_* values, so a cache left by the local-only E2E
   // export yields a bundle with no Supabase configuration — sign-in and sync
   // silently gone, invisible to every other budget metric.
   it("rejects a production export that lost its Supabase configuration", () => {
-    const { root } = fixture("console.log('no config here');");
+    const { root, js } = fixture("console.log('no config here');");
+    // A chunk the page never loads cannot configure the client the entry creates.
+    writeFileSync(join(js, "worker-test.js"), "var u='https://example.supabase.co';");
     const result = check(root, ["--require-supabase-config"], {
       env: { EXPO_PUBLIC_SUPABASE_URL: "https://example.supabase.co" },
     });
@@ -211,5 +224,52 @@ describe("web release budget", () => {
     const leaked = check(fixture(`var admin="${token("service_role")}";`).root);
     expect(leaked.status).toBe(1);
     expect(leaked.stderr).toContain("service-role JWT in");
+  });
+});
+
+describe("import-catalogue", () => {
+  it("takes the newest list the page links to, whatever order it lists them in", () => {
+    const link = (date: string, guid: string) => `<a href="https://titck.gov.tr/storage/Archive/2026/x/RuhsatlBeeriTbbirnlerListesi${date}_${guid}.xlsx">`;
+    const page = [link("16.10.2026", "b"), link("23.10.2026", "a"), link("31.12.2025", "c"), '<a href="https://titck.gov.tr/x.pdf">'].join("");
+    expect(newestList(page)).toEqual({ url: "https://titck.gov.tr/storage/Archive/2026/x/RuhsatlBeeriTbbirnlerListesi23.10.2026_a.xlsx", listedOn: "2026-10-23" });
+    expect(newestList("<p>Liste yok</p>")).toBeNull();
+  });
+
+  it("keeps a barcode as a GTIN-14 only when its check digit holds", () => {
+    expect([gtinOf(8699508010752), gtinOf(" 8699508010752 "), gtinOf("8699508010753"), gtinOf(":8683060090130"), gtinOf("868130827101"), gtinOf(null)]).toEqual([
+      "08699508010752",
+      "08699508010752",
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it("reads the rows under the headers wherever they stand, once each, a barcode shared by two products twice", () => {
+    const heads = ["SIRA NO", "BARKOD", "ÜRÜN ADI", "ETKİN MADDE", "ATC KODU ", "RUHSAT SAHİBİ", "RUHSATI ASKIDA OLMAYAN ÜRÜN: 0\nMADDE-23: 1"];
+    const rows = catalogueRows(
+      [
+        ["RUHSATLI BEŞERİ TIBBİ ÜRÜNLER LİSTESİ"],
+        heads,
+        [1, 8680150350112, "AKNEFLOKS  %1 KREM, 30 G", "nadifloksasin", "D10AF05 ", "BERAT", 0],
+        [2, 8680150350112, "Nimejel Plus %1+ %5 Jel, 50 G", null, null, null, 1],
+        [3, 8680150350112, "AKNEFLOKS  %1 KREM, 30 G", "nadifloksasin", "D10AF05 ", "BERAT", 0],
+        [4, "", "PAROL HOT", "parasetamol", "N02BE01", "ATABAY", null],
+        [5, 8699508010752, "  ", "x", "x", "x", 0],
+      ],
+      "2026-10-23",
+    );
+    expect(rows.map(({ id, ...row }) => ({ id: id.length, ...row }))).toEqual([
+      { id: 40, gtin: "08680150350112", name: "AKNEFLOKS %1 KREM, 30 G", active_substance: "nadifloksasin", atc: "D10AF05", holder: "BERAT", suspended: false, listed_on: "2026-10-23" },
+      { id: 40, gtin: "08680150350112", name: "Nimejel Plus %1+ %5 Jel, 50 G", active_substance: null, atc: null, holder: null, suspended: true, listed_on: "2026-10-23" },
+      { id: 40, gtin: null, name: "PAROL HOT", active_substance: "parasetamol", atc: "N02BE01", holder: "ATABAY", suspended: false, listed_on: "2026-10-23" },
+    ]);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(3);
+  });
+
+  it("refuses a sheet without its headers rather than loading it wrong", () => {
+    expect(() => catalogueRows([["SIRA NO", "ÜRÜN"]], "2026-10-23")).toThrow("no header row");
+    expect(() => catalogueRows([["BARKOD", "ÜRÜN ADI", "ETKİN MADDE"]], "2026-10-23")).toThrow("no atc, holder, suspended column");
   });
 });

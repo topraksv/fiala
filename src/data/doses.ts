@@ -71,10 +71,15 @@ export async function editDosePlan(id: string, patch: Partial<Omit<DosePlanField
 
 export const deleteDosePlans = (ids: readonly string[]) => deleteRows("dose_plans", ids);
 
-/** The plan's box, while it is live and counted: a box nobody counted has no stock to take from, and a move would make its first count a dose short. */
-async function countedBox(packageId: string): Promise<RowSnapshot | null> {
+/** Whether the person may change what is in a cabinet: the screens' `writes`. A move in a cabinet they only read would be refused, and wait as a dead letter. */
+export type Writes = (cabinetId: string) => boolean;
+
+const everywhere: Writes = () => true;
+
+/** The plan's box, while it is live, counted and the person's to change: a box nobody counted has no stock to take from, and a move would make its first count a dose short. */
+async function countedBox(packageId: string, writes: Writes): Promise<RowSnapshot | null> {
   const box = await findRow("packages", packageId);
-  if (!box || box.deleted_at != null) return null;
+  if (!box || box.deleted_at != null || !writes(String(box.cabinet_id))) return null;
   const sqlite = await getSqliteAsync();
   return (await sqlite.getFirstAsync("SELECT 1 FROM package_moves WHERE package_id = ? AND deleted_at IS NULL LIMIT 1", [packageId])) ? box : null;
 }
@@ -86,15 +91,15 @@ async function countedBox(packageId: string): Promise<RowSnapshot | null> {
  * Whatever move the dose held that is not the one wanted now goes: answered
  * otherwise, or its box changed.
  */
-async function doseMove(plan: RowSnapshot, dose: { dueOn: string; dueTime: string }, held: string | null, taken: boolean): Promise<{ moveId: string | null; writes: RowWrite[] }> {
+async function doseMove(plan: RowSnapshot, dose: { dueOn: string; dueTime: string }, held: string | null, taken: boolean, may: Writes): Promise<{ moveId: string | null; writes: RowWrite[] }> {
+  const key = await planMoveId(plan, dose);
   const packageId = (plan.package_id as string | null) ?? null;
-  const key = packageId ? await deterministicId(naturalKeys.doseMove(String(plan.id), dose.dueOn, dose.dueTime, packageId)) : null;
-  const box = taken && packageId ? await countedBox(packageId) : null;
+  const box = taken && packageId ? await countedBox(packageId, may) : null;
   const moveId = box ? key : null;
   const writes: RowWrite[] = [];
   for (const id of new Set([held, key])) {
     const move = id && id !== moveId ? await findRow("package_moves", id) : null;
-    if (move && move.deleted_at == null) writes.push({ table: "package_moves", row: { ...fromDbShape("package_moves", move), deletedAt: nowIso() } });
+    if (move && move.deleted_at == null && may(String(move.cabinet_id))) writes.push({ table: "package_moves", row: { ...fromDbShape("package_moves", move), deletedAt: nowIso() } });
   }
   if (box && moveId) {
     const move = await findRow("package_moves", moveId);
@@ -105,20 +110,31 @@ async function doseMove(plan: RowSnapshot, dose: { dueOn: string; dueTime: strin
   return { moveId, writes };
 }
 
+/** The id of the move a dose of `plan` takes from the box it names now; `null` when it names none. */
+function planMoveId(plan: RowSnapshot, dose: { dueOn: string; dueTime: string }): Promise<string | null> {
+  const packageId = (plan.package_id as string | null) ?? null;
+  return packageId ? deterministicId(naturalKeys.doseMove(String(plan.id), dose.dueOn, dose.dueTime, packageId)) : Promise.resolve(null);
+}
+
 /**
  * Answer a dose, or with `null` take the answer back. Taken, a plan naming a
  * live, counted box takes one dose out of it; answered otherwise afterwards,
  * the move goes. Put off, it is said again `SNOOZE_MINUTES` from `now`. One
  * write an undo takes back; nothing for a plan that is gone.
  */
-export async function answerDose(planId: string, dose: { dueOn: string; dueTime: string }, status: DoseStatus | null, now = new Date()): Promise<RowsWritten> {
+export async function answerDose(
+  planId: string,
+  dose: { dueOn: string; dueTime: string },
+  status: DoseStatus | null,
+  { now = new Date(), writes: may = everywhere }: { now?: Date; writes?: Writes } = {},
+): Promise<RowsWritten> {
   const id = await deterministicId(naturalKeys.doseLog(planId, dose.dueOn, dose.dueTime));
   return writeUndoable(async () => {
     const plan = await findRow("dose_plans", planId);
     if (!plan || plan.deleted_at != null) return [];
     const there = await findRow("dose_logs", id);
     const live = there?.deleted_at == null ? there : null;
-    const { moveId, writes } = await doseMove(plan, dose, (live?.move_id as string | null | undefined) ?? null, status === "taken");
+    const { moveId, writes } = await doseMove(plan, dose, (live?.move_id as string | null | undefined) ?? null, status === "taken", may);
     if (status == null) {
       if (live) writes.push({ table: "dose_logs", row: { ...fromDbShape("dose_logs", live), moveId: null, deletedAt: nowIso() } });
       return writes;
@@ -128,6 +144,39 @@ export async function answerDose(planId: string, dose: { dueOn: string; dueTime:
     writes.push(...(there ? editRow("dose_logs", there, row) : [{ table: "dose_logs" as const, row: { ...row, answeredBy: null } }]));
     return writes;
   });
+}
+
+/**
+ * After a pull, each answer the server's copy replaced gets the move its
+ * answer wants. Two phones answering one dose offline write the answer and
+ * the move apart, and last-write-wins settles each on its own: "taken" on one
+ * and "skipped" later on the other left the first one's move standing. So the
+ * answer decides: not taken, no move of its dose stays live; taken, the move
+ * it names comes back if another phone's answer had removed it. A taken
+ * answer that names none, its box uncounted where it was given, leaves a move
+ * another phone counted alone. Every phone that pulls the answer writes the
+ * same rows, so they settle, and an answer already in step writes nothing.
+ */
+export async function settleDoseMoves(logIds: readonly string[], may: Writes): Promise<void> {
+  await writeRows(async () => (await Promise.all(logIds.map((logId) => settledMoves(logId, may)))).flat());
+}
+
+async function settledMoves(logId: string, may: Writes): Promise<RowWrite[]> {
+  const log = await findRow("dose_logs", logId);
+  const plan = log && (await findRow("dose_plans", String(log.plan_id)));
+  if (!log || !plan) return [];
+  const held = (log.move_id as string | null) ?? null;
+  const key = await planMoveId(plan, { dueOn: String(log.due_on), dueTime: String(log.due_time) });
+  const kept = log.deleted_at == null && log.status === "taken" ? (held ?? key) : null;
+  return (await Promise.all([...new Set([held, key])].map((id) => settledMove(id, held, kept, may)))).flat();
+}
+
+/** One of an answer's moves made what its answer wants: live where kept, a tombstone otherwise; brought back only when the answer names it. */
+async function settledMove(id: string | null, held: string | null, kept: string | null, may: Writes): Promise<RowWrite[]> {
+  const move = id ? await findRow("package_moves", id) : null;
+  if (!move || !may(String(move.cabinet_id))) return [];
+  if (id !== kept) return move.deleted_at == null ? editRow("package_moves", move, { deletedAt: nowIso() }) : [];
+  return id === held ? editRow("package_moves", move, { deletedAt: null }) : [];
 }
 
 /** Every live plan on the device, by its medicine's name. */

@@ -8,6 +8,7 @@ import {
   AMOUNT_MAX_MILLI,
   BOX_VIEWS,
   boxExpiry,
+  catalogueFields,
   daysUntil,
   expiryState,
   foldName,
@@ -299,5 +300,48 @@ describe("sorting the cabinet", () => {
     expect(order("owner"), "a product's first owner, in Turkish order").toEqual(["Dolorex", "Benical", "Arveles", "Ecopirin", "Çinko"]);
     expect(order("owner", [...products].reverse()), "whichever way they arrive").toEqual(["Dolorex", "Benical", "Arveles", "Ecopirin", "Çinko"]);
     expect(products.map((product) => product.name), "the list it was given").toEqual(["Dolorex", "Benical", "Çinko", "Ecopirin", "Arveles"]);
+  });
+});
+
+describe("a catalogue name split into the form's fields", () => {
+  const split = (listed: string) => Object.values(catalogueFields(listed));
+
+  it("reads name, strength, form and pack as TİTCK writes them", () => {
+    expect(split("PAROL 500 MG TABLET, 20 ADET")).toEqual(["Parol", "500 mg", "tablet", "20 adet"]);
+    expect(split("ARVELES 50 MG/2 ML IM/IV ENJEKSİYONLUK ÇÖZELTİ, 10 AMPUL")).toEqual(["Arveles", "50 mg/2 ml", "im/iv enjeksiyonluk çözelti", "10 ampul"]);
+    expect(split("MAJEZIK % 0.25 ORAL SPREY, ÇÖZELTİ, 30 ML"), "the last comma's").toEqual(["Majezik", "% 0.25", "oral sprey, çözelti", "30 ml"]);
+    expect(split("Nimejel Plus %1+ %5 Jel, 50 G")).toEqual(["Nimejel Plus", "%1+ %5", "jel", "50 g"]);
+    expect(split("PAROL-K 500 MG/10MG TABLET (20 TABLET)"), "a pack in parentheses").toEqual(["Parol-K", "500 mg/10mg", "tablet", "20 tablet"]);
+    expect(split("PAROL 10 MG/ML INFUZYON SOLUSYONU"), "no pack").toEqual(["Parol", "10 mg/ml", "infuzyon solusyonu", null]);
+  });
+
+  it("lowers a Latin I to i, and capitalises each word of the name the Turkish way", () => {
+    expect(split("ADVIL LIQUI-GELS 200 MG KAPSUL, 20 ADET")).toEqual(["Advil Liqui-Gels", "200 mg", "kapsul", "20 adet"]);
+    expect(split("İBUPROFEN 400 MG FİLM TABLET, 20 TABLET")).toEqual(["İbuprofen", "400 mg", "film tablet", "20 tablet"]);
+  });
+
+  it("calls a number without a unit no strength, and leaves whole a name with no name before its number", () => {
+    expect(split("PAROL HOT 12 POSET GRANUL")).toEqual(["Parol Hot", null, "12 poset granul", null]);
+    expect(split("% 0,4 LIDODEKS İÇİNDE ÇÖZELTİ,  250 ML")).toEqual(["% 0,4 Lidodeks İçinde Çözelti", null, null, "250 ml"]);
+    expect(split("BEPANTHEN KREM")).toEqual(["Bepanthen Krem", null, null, null]);
+    expect(split("ASPIRIN 100 MG")).toEqual(["Aspirin", "100 mg", null, null]);
+  });
+
+  it("reads past stray spaces, a pack's own and a bracket's with none before it, and a form that begins like a unit", () => {
+    expect(split("  PAROL  500 MG   TABLET , 20 ADET ")).toEqual(["Parol", "500 mg", "tablet", "20 adet"]);
+    expect(split("PAROL 500 MG TABLET( 20 TABLET )")).toEqual(["Parol", "500 mg", "tablet", "20 tablet"]);
+    expect(split("KLORHEKSIDIN %0,2 GARGARA, 200 ML"), "G is a unit, GARGARA is not").toEqual(["Klorheksidin", "%0,2", "gargara", "200 ml"]);
+    expect(split("VITAMIN D3 1000 IU DAMLA, 50 ML"), "a digit inside the name").toEqual(["Vitamin D3", "1000 iu", "damla", "50 ml"]);
+  });
+
+  it("takes a bare number after the unit, before the form, as the pack's count", () => {
+    expect(split("ACYL 200 MG 25 TABLET")).toEqual(["Acyl", "200 mg", "tablet", "25 tablet"]);
+    expect(split("ADRENALIN BIOFARMA 1 MG/1 ML 100 AMPUL")).toEqual(["Adrenalin Biofarma", "1 mg/1 ml", "ampul", "100 ampul"]);
+    expect(split("ACYL 200 MG 25 TABLET, 25 ADET"), "a written pack wins").toEqual(["Acyl", "200 mg", "tablet", "25 adet"]);
+    expect(split("VITAMIN 10 MG 20"), "a count with no form after it").toEqual(["Vitamin", "10 mg", null, "20"]);
+    expect(split("AUGMENTIN 500 MG + 125 MG TABLET"), "after a plus it is a strength").toEqual(["Augmentin", "500 mg + 125 mg", "tablet", null]);
+    expect(split("ACYL 200 MG X25 TABLET"), "a number with a letter before it is not a count").toEqual(["Acyl", "200 mg", "x25 tablet", null]);
+    expect(split("ACYL 200 MG 25X TABLET"), "nor with a letter after it").toEqual(["Acyl", "200 mg", "25x tablet", null]);
+    expect(split("ZOLED 4 MG 5 ML FLAKON"), "before a unit it is a strength").toEqual(["Zoled", "4 mg 5 ml", "flakon", null]);
   });
 });

@@ -35,7 +35,7 @@ import { isSupabaseConfigured } from "../../sync/supabase";
 import { LOCK_KEY, lockName } from "../../ui/app-lock";
 import { BrandMark } from "../../ui/brand";
 import { PersonMark } from "../../ui/named-choices";
-import { Body, Button, Card, ChoiceTile, ListRow, Screen, SectionHeader, ToggleRow } from "../../ui/components";
+import { Body, Button, Card, ChoiceTile, ListRow, Screen, screenGutter, SectionHeader, ToggleRow } from "../../ui/components";
 import { appError } from "../../ui/dialog";
 import { shouldPairTiles } from "../../ui/responsive";
 import { alpha, appearanceTile, authHero, borderWidth, circle, controlSize, density, PALETTES, radius, spacing, type, useTheme, type Palette, type PaletteId, type ThemePreference } from "../../ui/theme";
@@ -61,7 +61,7 @@ const FAMILIES: readonly [PaletteId, string, string][] = [
 export default function SettingsScreen() {
   const { palette, scheme, paletteId, preference } = useTheme();
   const { width } = useWindowDimensions();
-  const stacked = !shouldPairTiles(width);
+  const stacked = !shouldPairTiles(width - 2 * screenGutter(width));
   const settings = useSettings();
   const people = usePeople();
   // The account is greeted as its own cabinet knows it.

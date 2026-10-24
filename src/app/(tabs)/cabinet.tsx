@@ -18,7 +18,7 @@ import { editBoxes, type CabinetBox, type CabinetProduct, type Household, type N
 import { useDocuments, useHouseholds, useLocations, usePeople, useShownCabinet, useTags } from "../../data/hooks";
 import { BOX_VIEWS, SOON_DAYS, boxExpiry, expiryState, formatAmount, formatDay, inView, lastOpenDay, localDay, matchesSearch, sortProducts, type BoxView } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
-import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, Screen, TextField } from "../../ui/components";
+import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, useTileColumns, Screen, TextField } from "../../ui/components";
 import { deleteRows, undoRows } from "../../db/mutations";
 import { takeCabinetFilter } from "../../ui/cabinet-link";
 import { appError } from "../../ui/dialog";
@@ -69,6 +69,7 @@ function visible(products: readonly CabinetProduct[], { query, sort, view, perso
 
 /** Dolabım: the boxes at home, grouped under their product, soonest to expire first. */
 export default function Cabinet() {
+  const columns = useTileColumns(3);
   const router = useRouter();
   const { palette } = useTheme();
   const cabinet = useShownCabinet();
@@ -224,7 +225,7 @@ export default function Cabinet() {
             style={{ marginBottom: spacing.sm }}
           />
           <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.cabinet.sortBy} style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-            {rowsOf(SORTS, 3).map((row, at) => (
+            {rowsOf(SORTS, columns).map((row, at) => (
               <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
                 {row.map((value) => (
                   <ChoiceTile key={value} label={tr.cabinet.sorts[value]} selected={sort === value} minHeight={controlSize.minimumTarget} onPress={() => setSort(value)} />
@@ -233,7 +234,7 @@ export default function Cabinet() {
             ))}
           </View>
           <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.cabinet.viewBy} style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-            {rowsOf(BOX_VIEWS, 3).map((row, at) => (
+            {rowsOf(BOX_VIEWS, columns).map((row, at) => (
               <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
                 {row.map((value) => (
                   <ChoiceTile key={value} label={tr.cabinet.views[value]} selected={view === value} minHeight={controlSize.minimumTarget} onPress={() => setView(value)} />
@@ -256,7 +257,10 @@ export default function Cabinet() {
                   open ? (product.cabinetId === open.id ? open.name : tr.households.private) : undefined,
                   tr.cabinet.boxes(product.boxes.length),
                   // The short list keeps a product's soonest day, which its first box carries.
-                  compact && product.boxes[0]?.expiresOn ? tr.cabinet.expires(formatDay(product.boxes[0].expiresOn)) : undefined,
+                  // Said in words too: the icon's colour alone tells no screen reader, and warning and error are close.
+                  compact && product.boxes[0]?.expiresOn
+                    ? tr.common.joined(tr.cabinet.expires(formatDay(product.boxes[0].expiresOn)), tr.cabinet.expiryStates[expiryState(product.boxes[0].expiresOn, today, product.boxes[0].soonDays ?? SOON_DAYS)])
+                    : undefined,
                   ...new Set(product.boxes.map((box) => nameOf(people, box.personId))),
                   product.activeSubstance ?? undefined,
                 )}
@@ -312,13 +316,14 @@ function Filter({
   chosen: string | null;
   onChoose: (id: string | null) => void;
 }) {
+  const columns = useTileColumns(3);
   const router = useRouter();
   if (named.length + first.length === 0) return null;
   const options: { id: string | null; name: string }[] = [{ id: null, name: tr.cabinet.everyone[table] }, ...first, ...named];
   return (
     <View style={{ marginBottom: spacing.sm }}>
       <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.names.title[table]} style={{ gap: spacing.sm }}>
-        {rowsOf(options, 3).map((row, at) => (
+        {rowsOf(options, columns).map((row, at) => (
           <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
             {row.map((option) => (
               <ChoiceTile key={option.id ?? "all"} label={option.name} selected={chosen === option.id} minHeight={controlSize.minimumTarget} onPress={() => onChoose(option.id)} />

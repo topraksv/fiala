@@ -16,7 +16,7 @@ vi.mock("../../src/db/client", async () => {
 
 vi.mock("expo-crypto", async () => (await import("../helpers")).expoCryptoMock);
 
-const { addDosePlan, answerDose, deleteDosePlans, editDosePlan, readDoseAnswers, readDosePlans } = await import("../../src/data/doses");
+const { addDosePlan, answerDose, deleteDosePlans, editDosePlan, readDoseAnswers, readDosePlans, settleDoseMoves } = await import("../../src/data/doses");
 const { addPackage, moveBox, openHousehold } = await import("../../src/data/cabinet");
 const { deleteRows, undoRows } = await import("../../src/db/mutations");
 const { migratedDatabase } = await import("../helpers");
@@ -88,6 +88,86 @@ describe("a dose plan", () => {
     await undoRows(written);
     expect((await readDosePlans())[0]!.packageId).toBe(box);
   });
+
+  it("puts a dose taken before its box moved back into the box where it went, into a household and back again", async () => {
+    const { box, plan } = await boxAndPlan();
+    await answerDose(plan, DOSE, "taken");
+    const house = await openHousehold("me", "Ev");
+    const { id: shared } = (await moveBox(box, house))!;
+    expect(held(shared), "it arrives holding what it held").toBe(29_000);
+    expect(all("SELECT m.package_id, m.reason, m.quantity_milli FROM dose_logs l JOIN package_moves m ON m.id = l.move_id"), "the answer names its dose's move there").toEqual([
+      { package_id: shared, reason: "use", quantity_milli: -1000 },
+    ]);
+    await answerDose(plan, DOSE, "skipped");
+    expect(held(shared)).toBe(30_000);
+    await answerDose(plan, DOSE, "taken");
+    expect(held(shared)).toBe(29_000);
+    const { id: mine } = (await moveBox(shared, "me"))!;
+    expect(held(mine)).toBe(29_000);
+    await answerDose(plan, DOSE, null);
+    expect(held(mine)).toBe(30_000);
+    expect(all("SELECT COUNT(*) AS n FROM package_moves WHERE deleted_at IS NULL AND quantity_milli < 0 AND package_id = '" + mine + "'")).toEqual([{ n: 0 }]);
+  });
+
+  it("takes nothing from a box in a cabinet the person only reads, and still keeps the answer", async () => {
+    const { box, plan } = await boxAndPlan();
+    const house = await openHousehold("me", "Ev");
+    const { id: shared } = (await moveBox(box, house))!;
+    await answerDose(plan, DOSE, "taken", { writes: (cabinetId) => cabinetId !== house });
+    expect(held(shared)).toBe(30_000);
+    expect(all("SELECT status, move_id FROM dose_logs")).toEqual([{ status: "taken", move_id: null }]);
+  });
+});
+
+describe("settling a pulled answer", () => {
+  const everywhere = () => true;
+  const outbox = () => Number(all("SELECT COUNT(*) AS n FROM outbox")[0]!.n);
+  const logId = () => String(all("SELECT id FROM dose_logs")[0]!.id);
+
+  it("takes out the move of a dose no longer taken, brings back the one a taken answer names, and keeps one another phone counted", async () => {
+    const { box, plan } = await boxAndPlan();
+    await answerDose(plan, DOSE, "taken");
+    harness.db!.exec("UPDATE dose_logs SET status = 'skipped', move_id = NULL");
+    await settleDoseMoves([logId()], everywhere);
+    expect(held(box), "skipped last, the dose goes back").toBe(30_000);
+
+    await answerDose(plan, DOSE, "taken");
+    harness.db!.exec("UPDATE package_moves SET deleted_at = '2026-10-20T06:00:00.000Z' WHERE quantity_milli < 0");
+    await settleDoseMoves([logId()], everywhere);
+    expect(held(box), "taken last, its move comes back").toBe(29_000);
+
+    harness.db!.exec("UPDATE dose_logs SET move_id = NULL");
+    await settleDoseMoves([logId()], everywhere);
+    expect(held(box), "taken where the box was not counted, the counted phone's move stays").toBe(29_000);
+
+    harness.db!.exec("UPDATE package_moves SET deleted_at = '2026-10-20T06:00:00.000Z' WHERE quantity_milli < 0");
+    await settleDoseMoves([logId()], everywhere);
+    expect(held(box), "nor does it bring back a move it does not name").toBe(30_000);
+    harness.db!.exec("UPDATE package_moves SET deleted_at = NULL");
+
+    harness.db!.exec("UPDATE dose_logs SET deleted_at = '2026-10-20T06:00:00.000Z'");
+    await settleDoseMoves([logId()], everywhere);
+    expect(held(box), "taken back, no move stays").toBe(30_000);
+  });
+
+  it("writes nothing for an answer already in step, a cabinet the person only reads, an answer or plan gone, or no answers", async () => {
+    const { box, plan } = await boxAndPlan();
+    await answerDose(plan, DOSE, "taken");
+    const before = outbox();
+    await settleDoseMoves([logId()], everywhere);
+    await settleDoseMoves([], everywhere);
+    await settleDoseMoves(["0190c000-0000-7000-8000-000000000000"], everywhere);
+    harness.db!.exec("UPDATE dose_logs SET status = 'skipped'");
+    await settleDoseMoves([logId()], () => false);
+    expect([outbox(), held(box)]).toEqual([before, 29_000]);
+    await answerDose(plan, DOSE, "skipped");
+    const skipped = outbox();
+    await settleDoseMoves([logId()], everywhere);
+    expect(outbox(), "a dose not taken whose move is already gone").toBe(skipped);
+    harness.db!.exec("DELETE FROM dose_plans");
+    await settleDoseMoves([logId()], everywhere);
+    expect([outbox(), held(box)]).toEqual([skipped, 30_000]);
+  });
 });
 
 describe("a dose's answer", () => {
@@ -127,7 +207,7 @@ describe("a dose's answer", () => {
 
   it("is put off for half an hour, and takes nothing from a plan with no box, a box gone or a box nobody counted", async () => {
     const { box, plan } = await boxAndPlan(false);
-    await answerDose(plan, DOSE, "snoozed", new Date("2026-10-20T05:00:00.000Z"));
+    await answerDose(plan, DOSE, "snoozed", { now: new Date("2026-10-20T05:00:00.000Z") });
     expect(all("SELECT status, snoozed_until FROM dose_logs")).toEqual([{ status: "snoozed", snoozed_until: "2026-10-20T05:30:00.000Z" }]);
     await answerDose(plan, DOSE, "taken");
     expect(all("SELECT status, snoozed_until, move_id FROM dose_logs")).toEqual([{ status: "taken", snoozed_until: null, move_id: null }]);

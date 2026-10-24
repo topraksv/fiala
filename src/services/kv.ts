@@ -70,3 +70,61 @@ export function kvSwitch(key: string) {
     },
   };
 }
+
+/** What a remembered list keeps of each item: enough to draw its row without asking. */
+export interface Remembered {
+  id: string;
+  title: string;
+  subtitle?: string;
+}
+
+/** SecureStore refuses a value past this, in UTF-8 bytes. */
+const SECURE_STORE_BYTES = 2048;
+
+const isRemembered = (item: unknown): item is Remembered =>
+  typeof (item as Remembered | null)?.id === "string" && typeof (item as Remembered).title === "string";
+
+/**
+ * A device-local list, newest first and at most `cap` long, read and changed
+ * as a switch is, and never past what SecureStore stores. What is added
+ * before the stored list is read stays in front of it.
+ */
+export function kvList(key: string, cap: number) {
+  let items: readonly Remembered[] = [];
+  const listeners = new Set<() => void>();
+  const show = (next: readonly Remembered[]) => {
+    items = next;
+    listeners.forEach((listener) => listener());
+  };
+  const save = (next: readonly Remembered[]) => {
+    // Long Turkish names reach the store's limit before the cap does; the oldest go first. An empty list, "[]", always fits.
+    let kept = next;
+    while (new TextEncoder().encode(JSON.stringify(kept)).length > SECURE_STORE_BYTES) kept = kept.slice(0, -1);
+    show(kept);
+    void kv.set(key, JSON.stringify(kept)).catch(() => {});
+  };
+  void kv.get(key).then((stored) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(String(stored));
+    } catch {
+      // A list that cannot be read starts again empty.
+    }
+    const read = Array.isArray(parsed) ? parsed.filter(isRemembered) : [];
+    if (read.length > 0) show([...items, ...read.filter((item) => !items.some((each) => each.id === item.id))].slice(0, cap));
+  });
+  return {
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    get: (): readonly Remembered[] => items,
+    add: (item: Remembered) => save([item, ...items.filter((each) => each.id !== item.id)].slice(0, cap)),
+    remove: (id: string) => save(items.filter((each) => each.id !== id)),
+    /** Emptied here and in the store: the device passes to another account. */
+    forget(): Promise<void> {
+      show([]);
+      return kv.remove(key);
+    },
+  };
+}

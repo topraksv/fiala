@@ -27,7 +27,7 @@ import { formatAmount, formatDay, localDay, parseAmount, parseDay } from "../dom
 import { EVERY_DAY, isTime, TIMES_MAX, timesOf } from "../domain/doses";
 import { tr } from "../i18n/tr";
 import { readDoseRinging, ringsHere, saveDoseRinging } from "../services/reminder-preferences";
-import { Body, Button, Card, IconButton, ListRow, Notice, Screen, SectionHeader, TextField, ToggleRow } from "../ui/components";
+import { Body, Button, Card, IconButton, ListRow, Missing, Notice, Screen, SectionHeader, TextField, ToggleRow } from "../ui/components";
 import { appConfirm, appError } from "../ui/dialog";
 import { useDirtyExitGuard } from "../ui/dirty-exit";
 import { daysOf, doseAmount } from "../ui/doses";
@@ -53,7 +53,7 @@ export default function DosePlanScreen() {
   if (id && !plan) {
     return (
       <Screen back="/doses" title={tr.doses.plan}>
-        {plans.status === "loading" ? null : <Notice tone="error" text={tr.doses.notFound} />}
+        <Missing query={plans} text={tr.doses.notFound} />
       </Screen>
     );
   }
@@ -361,7 +361,7 @@ function PlanForm({ title, plan, products, productId: given, packageId: givenBox
 
       {failure ? <Notice tone="error" text={failure} /> : null}
       <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
-        <Button label={busy ? tr.doses.saving : tr.doses.save} icon={Save} disabled={busy} onPress={() => void save()} />
+        <Button label={busy ? tr.doses.saving : tr.doses.save} icon={Save} loading={busy} disabled={busy} onPress={() => void save()} />
         {plan ? <PlanActions plan={plan} onDeleted={leave} /> : null}
       </View>
     </Screen>

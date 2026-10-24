@@ -22,7 +22,7 @@ import { formatAmount, formatDay, lastOpenDay, parseAmount, parseDay, parseDays,
 import type { PACKAGE_DISPOSITIONS } from "../../db/schema";
 import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
-import { Body, Button, Card, IconButton, ListRow, Notice, Screen, SectionHeader } from "../../ui/components";
+import { Body, Button, Card, IconButton, ListRow, Missing, ReadFailed, Screen, SectionHeader } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
 import { LinkedDocuments } from "../../ui/documents";
 import { CabinetChoice, changeLines, NamedChoices, useWriter, ViewOnly } from "../../ui/named-choices";
@@ -62,19 +62,16 @@ export default function BoxScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const cabinet = useCabinet();
-  const moves = useMoves(id);
-  const changes = useChanges(id);
   const people = usePeople();
   const locations = useLocations();
   const { writes } = useHouseholds();
   const product = cabinet.data.find((each) => each.boxes.some((box) => box.id === id));
   const box = product?.boxes.find((each) => each.id === id);
-  const writer = useWriter(box?.cabinetId);
 
   if (!product || !box) {
     return (
       <Screen back="/cabinet" title={tr.tabs.cabinet}>
-        {cabinet.status === "loading" ? null : <Notice tone="error" text={tr.box.notFound} />}
+        <Missing query={cabinet} text={tr.box.notFound} />
       </Screen>
     );
   }
@@ -162,17 +159,6 @@ export default function BoxScreen() {
   };
 
   const shown = said(product, box, unit);
-  // Moves and edits as one history; an id is a uuidv7, so a tie keeps the order they were written in.
-  const history = [
-    ...moves.data.map((each) => ({
-      id: each.id,
-      at: each.createdAt,
-      title: tr.box.move(each.reason, each.quantityMilli, unit),
-      by: each.createdBy,
-      lines: undefined as string | undefined,
-    })),
-    ...changes.data.map((each) => ({ id: each.id, at: each.createdAt, title: tr.box.changed, by: each.createdBy, lines: changeLines(each.changes, unit, people.data, locations.data, writer) || undefined })),
-  ].sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id));
   const details: [string, string, (() => void) | undefined][] = [
     [tr.box.nickname, shown.nickname, () => void changeText("nickname", tr.box.nickname, 80, tr.box.nicknameExamples)],
     [tr.addBox.expiry, shown.expiresOn, () => void changeDay("expiresOn", tr.addBox.expiry, tr.placeholders.expiry)],
@@ -244,8 +230,35 @@ export default function BoxScreen() {
 
       <LinkedDocuments target={{ package: box.id }} editable={editable} />
 
+      <History box={box} unit={unit} people={people.data} locations={locations.data} />
+
+      {box.disposition || !editable ? null : <Leave onLeave={(each) => void leave(each)} />}
+    </Screen>
+  );
+}
+
+/** What was done to the box, newest first, and by whom. */
+function History({ box, unit, people, locations }: { box: CabinetBox; unit: string; people: readonly Named[]; locations: readonly Named[] }) {
+  const moves = useMoves(box.id);
+  const changes = useChanges(box.id);
+  const writer = useWriter(box.cabinetId);
+  // Moves and edits as one history; an id is a uuidv7, so a tie keeps the order they were written in.
+  const history = [
+    ...moves.data.map((each) => ({
+      id: each.id,
+      at: each.createdAt,
+      title: tr.box.move(each.reason, each.quantityMilli, unit),
+      by: each.createdBy,
+      lines: undefined as string | undefined,
+    })),
+    ...changes.data.map((each) => ({ id: each.id, at: each.createdAt, title: tr.box.changed, by: each.createdBy, lines: changeLines(each.changes, unit, people, locations, writer) || undefined })),
+  ].sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id));
+  return (
+    <>
       <SectionHeader>{tr.box.historySection}</SectionHeader>
-      {history.length === 0 ? (
+      {moves.status === "error" || changes.status === "error" ? (
+        <ReadFailed queries={[moves, changes]} />
+      ) : moves.status === "loading" || changes.status === "loading" ? null : history.length === 0 ? (
         <Body muted>{tr.box.noHistory}</Body>
       ) : (
         <Card rows>
@@ -254,13 +267,10 @@ export default function BoxScreen() {
           ))}
         </Card>
       )}
-
-      {box.disposition || !editable ? null : <Leave onLeave={(each) => void leave(each)} />}
-    </Screen>
+    </>
   );
 }
 
-/** A box no longer at home, and for whoever may change it the way back. */
 /**
  * Whether the household sees the box (`docs/TASKS.md` F2.5): the household
  * it is in, or the open one for a box of the person's own. Moved, the box is
@@ -365,6 +375,7 @@ function Remaining({ box, unit, onMove }: { box: CabinetBox; unit: string; onMov
   );
 }
 
+/** A box no longer at home, and for whoever may change it the way back. */
 function Leave({ onLeave }: { onLeave: (disposition: (typeof PACKAGE_DISPOSITIONS)[number]) => void }) {
   return (
     <>

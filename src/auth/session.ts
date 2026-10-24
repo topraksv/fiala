@@ -19,6 +19,7 @@ import { pendingOutboxCount, resetLocalWorkspace } from "../db/mutations";
 import { useSyncStatus } from "../sync/status";
 import { tr } from "../i18n/tr";
 import { kv } from "../services/kv";
+import { forgetGuide } from "../services/guide";
 import { forgetReminderPreferences } from "../services/reminder-preferences";
 import { cancelReminders } from "../services/reminders";
 import { flushOutbox, startSyncSession, stopSyncSession } from "../sync/engine";
@@ -110,6 +111,7 @@ async function ensureWorkspaceFor(userId: string): Promise<string | null> {
       if (owner !== WIPE_PENDING && (await pendingOutboxCount()) > 0) return tr.auth.errOtherAccountPending;
       await cancelReminders().catch(ignore);
       await forgetReminderPreferences().catch(ignore);
+      await forgetGuide().catch(ignore);
       await wipeWorkspace();
     } catch {
       return tr.auth.errWorkspaceReset;
@@ -430,6 +432,8 @@ export const useSession = create<SessionStore>((set, get) => ({
         if (userId) startSyncSession(userId);
         return tr.auth.errWorkspaceReset;
       }
+      // The owner mark goes below, so the next account to sign in meets no switch to forget these at.
+      await Promise.all([forgetReminderPreferences().catch(ignore), forgetGuide().catch(ignore)]);
       set(signedOut);
       await Promise.all([endAuthSession(supabase, "local"), forgetAccount()]);
       return null;

@@ -141,15 +141,16 @@ describe("the privacy manifest", () => {
     const notice = tr.legal.collected.join(" ");
     for (const [type, described] of [
       ["NSPrivacyCollectedDataTypeEmailAddress", /E-posta adresiniz/],
+      ["NSPrivacyCollectedDataTypeName", /görünen adınız/],
       ["NSPrivacyCollectedDataTypeOtherUserContent", /Ayar verisi/],
-      ["NSPrivacyCollectedDataTypePhotosorVideos", /ekran görüntüleri/],
+      ["NSPrivacyCollectedDataTypePhotosorVideos", /Görsel veri/],
       ["NSPrivacyCollectedDataTypeCustomerSupport", /[Gg]eri bildirim/],
       ["NSPrivacyCollectedDataTypeHealth", /Sağlık verisi/],
     ] as const) {
       expect(declared.has(type), `${type} must be declared to Apple`).toBe(true);
       expect(notice, `${type} must also be described in the notice`).toMatch(described);
     }
-    expect(declared.size, "a type declared to Apple and not in Turkish would slip past the rows above").toBe(5);
+    expect(declared.size, "a type declared to Apple and not in Turkish would slip past the rows above").toBe(6);
   });
 
   it("declares only the required-reason API the app's own binary drives", () => {

@@ -10,10 +10,10 @@ import X from "lucide-react-native/icons/x";
 
 import { useSession } from "../auth/session";
 import { isEmail } from "../domain/names";
-import { FEEDBACK_CATEGORIES, FEEDBACK_MESSAGE_MAX, FEEDBACK_MESSAGE_MIN, MAX_FEEDBACK_IMAGES, feedbackMessageRejection, type FeedbackCategory } from "../domain/feedback";
+import { FEEDBACK_CATEGORIES, FEEDBACK_MESSAGE_MAX, FEEDBACK_MESSAGE_MIN, MAX_FEEDBACK_IMAGES, feedbackMessageRejection, isFeedbackCategory, type FeedbackCategory } from "../domain/feedback";
 import { tr } from "../i18n/tr";
 import { sendFeedback, type FeedbackResult } from "../services/feedback";
-import { Body, Button, ChoiceTile, FieldError, IconButton, Notice, Screen, SectionHeader, TextField, rowsOf } from "../ui/components";
+import { Body, Button, ChoiceTile, FieldError, IconButton, Notice, Screen, SectionHeader, TextField, rowsOf, useTileColumns } from "../ui/components";
 import { useDirtyExitGuard } from "../ui/dirty-exit";
 import { radioGroupKeys } from "../ui/keys";
 import { navigateBack } from "../ui/navigation";
@@ -29,13 +29,20 @@ const REFUSED: Record<Exclude<FeedbackResult, "sent">, string> = {
   failed: tr.feedback.failed,
 };
 
+/** A screen that reports something of its own (a product's wrong match) opens the form filled. */
+function opening(given: { email?: string; category?: string; message?: string }): { replyTo: string; category: FeedbackCategory; message: string } {
+  return { replyTo: given.email ?? "", category: isFeedbackCategory(given.category) ? given.category : "functional", message: given.message ?? "" };
+}
+
 export default function FeedbackScreen() {
+  const columns = useTileColumns(2);
   const router = useRouter();
   const signedIn = useSession((s) => s.userId != null);
   const home = signedIn ? "/settings" : "/sign-in";
-  const [replyTo, setReplyTo] = useState(useLocalSearchParams<{ email?: string }>().email ?? "");
-  const [category, setCategory] = useState<FeedbackCategory>("functional");
-  const [message, setMessage] = useState("");
+  const given = opening(useLocalSearchParams<{ email?: string; category?: string; message?: string }>());
+  const [replyTo, setReplyTo] = useState(given.replyTo);
+  const [category, setCategory] = useState(given.category);
+  const [message, setMessage] = useState(given.message);
   const [images, setImages] = useState<string[]>([]);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -72,7 +79,7 @@ export default function FeedbackScreen() {
       <Body muted style={{ marginBottom: spacing.lg }}>{tr.feedback.intro}</Body>
       <SectionHeader>{tr.feedback.categoryLabel}</SectionHeader>
       <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.feedback.categoryLabel} style={{ gap: spacing.sm }}>
-        {rowsOf(FEEDBACK_CATEGORIES, 2).map((row, at) => (
+        {rowsOf(FEEDBACK_CATEGORIES, columns).map((row, at) => (
           <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
             {row.map((value) => (
               <ChoiceTile
@@ -124,7 +131,7 @@ export default function FeedbackScreen() {
       <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
         <Button label={tr.legal.open} variant="ghost" size="sm" onPress={() => router.push("/privacy")} />
       </View>
-      <Button label={busy ? tr.feedback.sending : tr.feedback.send} icon={Send} disabled={busy} onPress={() => void submit()} />
+      <Button label={busy ? tr.feedback.sending : tr.feedback.send} icon={Send} loading={busy} disabled={busy} onPress={() => void submit()} />
     </Screen>
   );
 }

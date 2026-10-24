@@ -42,7 +42,7 @@ import { KeyboardSafeScrollView } from "./keyboard-safe";
 import { useReducedMotion, useSpringTo, useWaitBreath } from "./motion";
 import { navigateBack } from "./navigation";
 import { useRotatingPlaceholder } from "./placeholders";
-import { shouldUseWideGutter } from "./responsive";
+import { shouldUseWideGutter, tileColumns } from "./responsive";
 import { Press } from "./press";
 import {
   alpha,
@@ -141,6 +141,11 @@ export function SuccessPop({ children }: { children: ReactNode }) {
   );
 }
 
+/** The side padding `Screen` keeps, so a layout that measures its column subtracts the same. */
+export function screenGutter(viewportWidth: number): number {
+  return shouldUseWideGutter(viewportWidth) ? spacing.xxl : spacing.lg;
+}
+
 /**
  * Every routed surface renders one Screen, which owns what a screen never
  * restates: the gutter, the top inset, the clearance under the floating tab
@@ -173,7 +178,7 @@ export function Screen({
   // Pressing the tab you are on returns its screen to the top.
   const scrollRef = useRef<ScrollViewInstance>(null);
   useScrollToTop(scrollRef);
-  const gutter = shouldUseWideGutter(width) ? spacing.xxl : spacing.lg;
+  const gutter = screenGutter(width);
   const bottomPad = inTabs
     ? navigationInset({ bottomInset: insets.bottom, isWeb: Platform.OS === "web" }).bottom
     : Math.max(insets.bottom, spacing.lg) + spacing.md;
@@ -372,6 +377,10 @@ export function ListRow({
   selected?: boolean;
 }) {
   const { palette } = useTheme();
+  // A row that opens something holds its own control beside it, not inside:
+  // inside, a screen reader reads the row as one button and never reaches it,
+  // and the web nests a button in a button.
+  const beside = onPress != null && right != null;
   const content = (
     <View style={{ paddingVertical: spacing.md - 2 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
@@ -380,7 +389,7 @@ export function ListRow({
           <Text style={[type.body, { color: palette.text, fontFamily: font.medium }]}>{title}</Text>
           {subtitle ? <Text style={[type.small, { color: palette.textSecondary, marginTop: offset.hair }]}>{subtitle}</Text> : null}
         </View>
-        {right}
+        {beside ? null : right}
         {selected !== undefined ? (
           <CheckMark checked={selected} />
         ) : chevron ? (
@@ -390,7 +399,7 @@ export function ListRow({
     </View>
   );
   if (!onPress) return content;
-  return (
+  const row = (
     <Press
       accessibilityRole="button"
       accessibilityLabel={tr.common.withDetail(title, subtitle ?? "")}
@@ -401,6 +410,13 @@ export function ListRow({
     >
       {content}
     </Press>
+  );
+  if (!beside) return row;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+      <View style={{ flex: 1, minWidth: 0 }}>{row}</View>
+      {right}
+    </View>
   );
 }
 
@@ -698,6 +714,12 @@ export function Body({ children, muted, style }: { children: ReactNode; muted?: 
   );
 }
 
+/** `tileColumns` for the column a `Screen` holds at this window's width and text size. */
+export function useTileColumns(wanted: number, tileWidth?: number): number {
+  const { width, fontScale } = useWindowDimensions();
+  return tileColumns(width - 2 * screenGutter(width), fontScale, wanted, tileWidth);
+}
+
 /** `items` in rows of `columns`, the last one short when they do not divide. */
 export function rowsOf<T>(items: readonly T[], columns: number): T[][] {
   return Array.from({ length: Math.ceil(items.length / columns) }, (_, row) => items.slice(row * columns, (row + 1) * columns));
@@ -969,6 +991,12 @@ export function ReadFailed({ queries }: { queries: readonly { retry: () => void 
       action={<Button label={tr.common.retry} onPress={() => queries.forEach((query) => query.retry())} />}
     />
   );
+}
+
+/** A screen's row that is not there: nothing while it reads, `ReadFailed` if the read fails, else `text`. */
+export function Missing({ query, text }: { query: { status: string; retry: () => void }; text: string }) {
+  if (query.status === "loading") return null;
+  return query.status === "error" ? <ReadFailed queries={[query]} /> : <Notice tone="error" text={text} />;
 }
 
 /** `pulledOnce` on screen; a build with no server has nothing to wait for. */

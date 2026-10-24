@@ -275,6 +275,9 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
             <Stack.Screen name="status-cards" />
             <Stack.Screen name="profile" />
             <Stack.Screen name="help" />
+            <Stack.Screen name="medicine/[id]" />
+            <Stack.Screen name="pharmacies" />
+            <Stack.Screen name="pharmacy/[id]" />
           </Stack.Protected>
           <Stack.Protected guard={!signedIn}>
             <Stack.Screen name="(auth)/sign-in" />

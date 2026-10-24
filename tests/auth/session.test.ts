@@ -76,6 +76,8 @@ vi.mock("../../src/services/kv", () => {
       set: async (key: string, value: string) => void (reach(key), device.dropped.has(key) || device.stored.set(key, value)),
       remove: async (key: string) => void (reach(key), device.stored.delete(key)),
     },
+    // The guide's lists, as far as an account switch reaches them: forgetting.
+    kvList: (key: string) => ({ forget: async () => void device.stored.delete(key) }),
   };
 });
 const sync = vi.hoisted(() => ({
@@ -263,6 +265,8 @@ describe("whose rows the device holds", () => {
     await session().signIn(A.email, A.password);
     await makeRow();
     device.stored.set("fiala.reminders.names", "true");
+    device.stored.set("fiala.guide.recentMedicines", '[{"id":"a","title":"Parol"}]');
+    device.stored.set("fiala.guide.place", '{"province":"İzmir","district":null}');
     useSession.setState({ userId: null });
 
     expect(await session().signIn(B.email, B.password)).toBe(tr.auth.errOtherAccountPending);
@@ -278,6 +282,7 @@ describe("whose rows the device holds", () => {
     expect(device.stored.get(OWNER)).toBe(B.id);
     expect(device.cancelled, "A's reminders, with A's rows").toBe(1);
     expect(device.stored.has("fiala.reminders.names"), "B has not let a lock screen name its medicines").toBe(false);
+    expect(["fiala.guide.recentMedicines", "fiala.guide.place"].map((key) => device.stored.has(key)), "nor opened A's medicines, or chosen A's place").toEqual([false, false]);
   });
 
   it("refuses a sign-in whose ownership it could not record, or read", async () => {
@@ -512,6 +517,8 @@ describe("signing out", () => {
   it("asks before destroying what could not be sent, then empties the device", async () => {
     await session().signIn(A.email, A.password);
     await makeRow();
+    device.stored.set("fiala.reminders.names", "true");
+    device.stored.set("fiala.guide.starredMedicines", '[{"id":"a","title":"Parol"}]');
     expect(await session().signOut()).toBe(SIGN_OUT_PENDING_CHANGES);
     expect(session().userId).toBe(A.id);
     expect(rows()).toBe(1);
@@ -523,6 +530,8 @@ describe("signing out", () => {
     expect(cloud.calls).toEqual(["signOut:local"]);
     for (const key of [OWNER, LAST_USER, LAST_EMAIL]) expect(device.stored.has(key)).toBe(false);
     expect(device.cancelled).toBe(1);
+    // With the owner mark gone, the next account's sign-in sees no switch to forget them at.
+    expect(["fiala.reminders.names", "fiala.guide.starredMedicines"].map((key) => device.stored.has(key)), "A's opt-in and A's stars").toEqual([false, false]);
   });
 
   it("keeps everything, the account still signed in, when the device cannot be emptied", async () => {

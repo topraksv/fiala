@@ -18,6 +18,8 @@ import { getSqliteAsync, withTransaction } from "../db/client";
 import { fromDbShape, nowIso, onLocalWrite, writeRows, type RowWrite } from "../db/mutations";
 import { SYNCED_TABLES, UNPULLED, type SyncedTableName } from "../db/schema";
 import { tr } from "../i18n/tr";
+import { readHouseholds, writes } from "../data/cabinet";
+import { settleDoseMoves } from "../data/doses";
 import { retryDeadLetter } from "./dead-letters";
 import {
   classifyOutboxBatch,
@@ -426,6 +428,8 @@ async function pullTable(
         if (unsent.has(String(remote.id))) continue;
         if (remoteWinsLww(held?.updated_at ?? null, String(remote.updated_at), held?.tombstone_version ?? 0, Number(remote.tombstone_version))) {
           await upsertLocal(sqlite, table, remote);
+          // Kept with the row, so a sync cut short before the settling still settles it next time.
+          if (table === "dose_logs") await sqlite.runAsync("INSERT OR IGNORE INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [`${SETTLE}${String(remote.id)}`, nowIso()]);
         }
       }
       const last = (data as Record<string, unknown>[]).at(-1)!;
@@ -569,6 +573,21 @@ async function purgeDeletedHouseholds(): Promise<void> {
   for (const { id } of gone) await forgetCabinet(sqlite, id);
 }
 
+const SETTLE = "settle:";
+
+/** The doses whose answer the pull replaced, given the moves their answers want (`settleDoseMoves`). */
+async function settlePulledDoses(userId: string): Promise<void> {
+  const sqlite = await getSqliteAsync();
+  const keys = await sqlite.getAllAsync<{ table_name: string }>("SELECT table_name FROM sync_state WHERE table_name LIKE ?", [`${SETTLE}%`]);
+  if (keys.length === 0) return;
+  const households = await readHouseholds();
+  await settleDoseMoves(
+    keys.map((key) => key.table_name.slice(SETTLE.length)),
+    (cabinetId) => writes(households, userId, cabinetId),
+  );
+  await sqlite.runAsync("DELETE FROM sync_state WHERE table_name LIKE ?", [`${SETTLE}%`]);
+}
+
 const RETRIED = "retried:";
 
 /**
@@ -612,6 +631,7 @@ async function runSync(userId: string, token: SessionEpochToken, allowRefresh: b
     await pullAll(supabase, userId, token);
     await followMemberships(supabase, userId, token);
     assertActive(token);
+    await settlePulledDoses(userId);
     await purgeDeletedHouseholds();
     await fetchMissingPhotos(supabase, token.signal);
     await sweepUnnamedPhotos(supabase, token.signal);

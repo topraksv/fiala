@@ -79,7 +79,7 @@ export function PhotoField({
       <Body>{tr.photos.title}</Body>
       {shown ? (
         <View>
-          <Press accessibilityRole="button" accessibilityLabel={`${tr.photos.enlarge}, ${tr.photos.of(name)}`} onPress={() => setEnlarged(true)}>
+          <Press accessibilityRole="button" accessibilityLabel={tr.common.withDetail(tr.photos.enlarge, tr.photos.of(name))} onPress={() => setEnlarged(true)}>
             <Image
               source={{ uri: shown }}
               accessible={false}

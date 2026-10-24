@@ -16,6 +16,7 @@ import PackageX from "lucide-react-native/icons/package-x";
 import Pill from "lucide-react-native/icons/pill";
 import Plus from "lucide-react-native/icons/plus";
 import ScanLine from "lucide-react-native/icons/scan-line";
+import Search from "lucide-react-native/icons/search";
 import RotateCcwClock from "lucide-react-native/icons/rotate-ccw-clock";
 import ShoppingBasket from "lucide-react-native/icons/shopping-basket";
 import SlidersHorizontal from "lucide-react-native/icons/sliders-horizontal";
@@ -177,9 +178,9 @@ export default function Status() {
         <Card rows>{rows}</Card>
       </>
     );
-  // The last row opens the same boxes as Dolabım's list, with what it does there.
+  // The first few, soonest first, and a last row that opens them all in Dolabım's list, with what it does there.
   const listCard = (title: string, held: Held[], view: BoxView, icon: typeof Clock, tone: "error" | "warning" | null, subtitle: (box: CabinetBox) => string) =>
-    card(title, held.length === 0 ? [] : [...boxRows(held, icon, tone, subtitle), <ListRow key="all" icon={ListFilter} title={tr.status.seeAll} chevron onPress={() => openCabinet({ view })} />]);
+    card(title, held.length === 0 ? [] : [...boxRows(held.slice(0, RECENT), icon, tone, subtitle), <ListRow key="all" icon={ListFilter} title={tr.status.seeAll} chevron onPress={() => openCabinet({ view })} />]);
 
   const owned = people.data.flatMap((person) => {
     const count = home.filter(({ box }) => box.personId === person.id).length;
@@ -199,7 +200,7 @@ export default function Status() {
               key="next"
               icon={Pill}
               iconColor={next?.state === "due" ? palette.warning : undefined}
-              title={next ? tr.doses.next(next.dueTime, nameOf(next.planId)) : tr.doses.allAnswered}
+              title={next ? tr.common.joined(tr.doses.next(next.dueTime, nameOf(next.planId)), next.state === "due" ? tr.doses.states.due : undefined) : tr.doses.allAnswered}
               subtitle={tr.doses.todayCount(doses.filter((dose) => dose.state === "taken").length, doses.length)}
               chevron
               onPress={() => router.push("/doses")}
@@ -256,6 +257,7 @@ export default function Status() {
           {canScan ? <Button label={tr.addBox.scan} icon={ScanLine} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { scan: "1" } })} /> : null}
           <Button label={tr.cabinet.add} icon={Plus} variant="secondary" onPress={add} />
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
+            <Button label={tr.catalogue.search} icon={Search} variant="ghost" size="sm" onPress={() => router.push({ pathname: "/add-box", params: { search: "1" } })} />
             <Button label={tr.doses.quickAdd} icon={CalendarClock} variant="ghost" size="sm" onPress={() => router.push("/dose-plan")} />
             <Button label={tr.doses.uploadPrescription} icon={FileUp} variant="ghost" size="sm" onPress={() => router.push("/add-document")} />
           </View>

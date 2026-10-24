@@ -185,7 +185,7 @@ export default function ImportScreen() {
             </Card>
           ) : null}
           {ready.length > SHOWN ? <Body muted style={{ marginBottom: spacing.md }}>{tr.importFile.more(ready.length - SHOWN)}</Body> : null}
-          <Button label={busy ? tr.importFile.saving : tr.importFile.add(ready.length)} disabled={busy || ready.length === 0} onPress={() => void save()} />
+          <Button label={busy ? tr.importFile.saving : tr.importFile.add(ready.length)} loading={busy} disabled={busy || ready.length === 0} onPress={() => void save()} />
         </>
       ) : null}
     </Screen>

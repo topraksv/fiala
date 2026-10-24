@@ -16,7 +16,7 @@ import { useHouseholds } from "../data/hooks";
 import { PERSON_COLORS, type PACKAGE_DISPOSITIONS } from "../db/schema";
 import { formatAmount, formatDay } from "../domain/boxes";
 import { tr } from "../i18n/tr";
-import { Body, Button, ChoiceTile, SectionHeader, rowsOf } from "./components";
+import { Body, Button, ChoiceTile, SectionHeader, rowsOf, useTileColumns } from "./components";
 import { appError, appPrompt } from "./dialog";
 import { radioGroupKeys } from "./keys";
 import { circle, controlSize, font, personColors, personMark, spacing, type, useTheme } from "./theme";
@@ -123,6 +123,7 @@ export function NamedChoices({
   /** Writes the name typed; the screen chooses it, since what choosing writes is the screen's. */
   onAdd: (name: string) => Promise<unknown>;
 }) {
+  const columns = useTileColumns(2);
   const person = table === "people";
   const heading = title ?? (person ? tr.addBox.whoseSection : tr.addBox.whereSection);
   const add = async () => {
@@ -145,7 +146,7 @@ export function NamedChoices({
     <>
       <SectionHeader>{heading}</SectionHeader>
       <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={heading} style={{ gap: spacing.sm, marginBottom: spacing.sm }}>
-        {rowsOf(options, 2).map((row, at) => (
+        {rowsOf(options, columns).map((row, at) => (
           <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
             {row.map((option) => (
               <ChoiceTile

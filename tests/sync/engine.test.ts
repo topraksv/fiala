@@ -1583,4 +1583,40 @@ describe("doses", () => {
     });
     expect(cloud.rows("package_moves").filter((move) => move.reason === "use" && move.deleted_at == null)).toHaveLength(1);
   });
+
+  it("gives a dose answered two ways offline the move its last answer wants, once the answer is pulled", async () => {
+    cloud.insertAsServer("cabinets", { id: HOUSE, owner_id: OTHER, name: "Ev" });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000d0d1", cabinet_id: HOUSE, user_id: OTHER, role: "owner", name: "Can", seen_at: null });
+    cloud.insertAsServer("cabinet_members", { id: "0190a000-0000-7000-8000-00000000d0d2", cabinet_id: HOUSE, user_id: USER, role: "editor", name: "Ece", seen_at: null });
+    const { box, plan } = await on("C", async () => {
+      const made = await addPackage(HOUSE, { name: "Coraspin" }, { unit: "tablet" }, 30_000);
+      const productId = String((devices.C.prepare("SELECT product_id FROM packages").get() as { product_id: string }).product_id);
+      const planned = await addDosePlan({ productId, packageId: made, personId: null, amountMilli: 1000, times: ["08:00"], weekdays: 127, startsOn: "2026-10-19", endsOn: null, instructions: null });
+      expect(await sync()).toBe(true);
+      return { box: made, plan: planned };
+    });
+    await on("A", async () => {
+      await sync();
+      // Offline from here: this device never sees the other's move.
+      await answerDose(plan, DOSE, "skipped");
+    });
+    await on("C", async () => {
+      await answerDose(plan, DOSE, "taken");
+      expect(await sync()).toBe(true);
+    });
+    await on("A", async () => {
+      expect(await sync()).toBe(true);
+      expect(await remainingMilli(box), "the move came with the pull, and the answer it brought back took it out").toBe(30_000);
+      expect(devices.A.prepare("SELECT COUNT(*) AS n FROM sync_state WHERE table_name LIKE 'settle:%'").get(), "nothing is left to settle").toEqual({ n: 0 });
+      expect(await sync()).toBe(true);
+    });
+    expect(cloud.rows("dose_logs")).toEqual([expect.objectContaining({ status: "skipped", answered_by: USER })]);
+    expect(cloud.rows("package_moves").filter((move) => move.reason === "use" && move.deleted_at == null)).toEqual([]);
+    await on("C", async () => {
+      expect(await sync()).toBe(true);
+      expect(await remainingMilli(box)).toBe(30_000);
+      expect(await sync()).toBe(true);
+    });
+    expect(cloud.rows("package_moves").filter((move) => move.reason === "use" && move.deleted_at == null), "and the other device, settling the same answer, agrees").toEqual([]);
+  });
 });

@@ -338,3 +338,49 @@ export function sortProducts<P extends { name: string; boxes: readonly SortedBox
   };
   return [...products].sort((a, b) => compare[sort](a, b) || byName(a, b));
 }
+
+/** A word of a strength: a number, a percentage, a unit, or a unit per amount ("MG/2"), as TİTCK writes them. */
+const BARE = /^\d[\d.,]*$/u;
+const STRENGTH_WORD = /^(?:%?\d[\d.,]*%?\+?|%|\+|\/|(?:MCG|MG|µG|G|ML|L|IU|MIU|IU\/ML|DOZ)(?:\/[\d.,]*(?:MCG|MG|G|ML|L|DOZ)?)?)$/iu;
+// TİTCK writes a Latin name's i as a plain I ("MAJEZIK"), so an I lowers to i, not to a dotless ı.
+const lowered = (words: string) => words.replace(/İ/g, "i").toLowerCase();
+const titled = (words: string) => lowered(words).replace(/(^|[\s-])(\p{L})/gu, (_, gap: string, letter: string) => gap + letter.toLocaleUpperCase("tr-TR"));
+const lower = (words: string) => lowered(words) || null;
+
+/** A bare number after the strength's unit, before a word that is none: the pack's count, "200 MG 25 TABLET" (478 of the list's names). */
+const isCount = (words: readonly string[], at: number, first: number) =>
+  at > first && BARE.test(words[at]!) && /[a-zµ]/iu.test(words[at - 1]!) && !STRENGTH_WORD.test(words[at + 1]!);
+
+/**
+ * A catalogue name split into the form's fields (F1.10): "PAROL 500 MG
+ * TABLET, 20 ADET" is Parol, 500 mg, tablet, 20 adet. The name is the words
+ * before the first number or percentage; the strength the number and unit
+ * words that follow, only if a unit or a percentage is among them; the form
+ * the rest; the pack what follows the last comma, or a closing parenthesis.
+ * A name that begins with its strength stays whole: there is no name to cut.
+ */
+export function catalogueFields(listed: string): { name: string; strength: string | null; form: string | null; pack: string | null } {
+  // Untrimmed: the list's names arrive trimmed (`text` in scripts/import-catalogue.mjs), and each part cut from one is trimmed again.
+  const text = listed.replace(/\s+/g, " ");
+  // The pack is optional, so this matches every text, and lazily from its first letter: no `^` to hold it there.
+  const [, before, comma, bracket] = /(.*?)(?:, ([^,]+)|\s*\(([^()]+)\))?$/u.exec(text)!;
+  const packed = comma ?? bracket;
+  const head = before!.trim() || text;
+  const pack = packed ? lower(packed.trim()) : null;
+  const words = head.split(" ");
+  const first = words.findIndex((word) => /^[%\d]/u.test(word));
+  if (first <= 0) return { name: titled(head), strength: null, form: null, pack };
+  let end = first;
+  // Past the last word the test reads `undefined` as text, which is no strength word.
+  while (STRENGTH_WORD.test(words[end]!) && !isCount(words, end, first)) end++;
+  const measured = words.slice(first, end);
+  const hasUnit = measured.some((word) => /%|[a-zµ]/iu.test(word));
+  const count = isCount(words, end, first) ? words[end]! : null;
+  const form = words.slice(count ? end + 1 : hasUnit ? end : first).join(" ");
+  return {
+    name: titled(words.slice(0, first).join(" ")),
+    strength: hasUnit ? lower(measured.join(" ")) : null,
+    form: lower(form),
+    pack: pack ?? (count ? lower(`${count} ${form}`.trim()) : null),
+  };
+}

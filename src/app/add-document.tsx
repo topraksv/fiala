@@ -201,7 +201,7 @@ export default function AddDocumentScreen() {
       <View style={{ alignItems: "flex-start", marginVertical: spacing.lg }}>
         <Button label={tr.legal.open} variant="ghost" size="sm" onPress={() => router.push("/privacy")} />
       </View>
-      <Button label={busy ? tr.documents.saving : tr.documents.save} icon={Save} disabled={busy} onPress={() => void save()} />
+      <Button label={busy ? tr.documents.saving : tr.documents.save} icon={Save} loading={busy} disabled={busy} onPress={() => void save()} />
     </Screen>
   );
 }

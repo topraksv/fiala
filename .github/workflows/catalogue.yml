@@ -1,0 +1,59 @@
+# Loads the guide's public data weekly: TİTCK's list of licensed human
+# medicines into `catalogue_products` (docs/TASKS.md F1.9,
+# scripts/import-catalogue.mjs), and OpenStreetMap's pharmacies into
+# `pharmacies` (F5.6a, scripts/import-pharmacies.mjs). TİTCK publishes on
+# Fridays; Saturday morning finds the new file. Each script prints only a row
+# count and a date: nothing a person typed or owns passes through here.
+#
+# GitHub disables a public repository's scheduled workflows after 60 days with
+# no repository activity; docs/RELEASE.md says what to do then.
+name: catalogue
+
+on:
+  schedule:
+    - cron: "0 5 * * 6" # Saturdays at 05:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalogue
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Load the newest list
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/import-catalogue.mjs
+
+  # Its own job: one source down never holds back the other.
+  pharmacies:
+    runs-on: ubuntu-latest
+    # Two Overpass questions take about seven minutes, and a busy server is retried.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Load the pharmacies
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/import-pharmacies.mjs

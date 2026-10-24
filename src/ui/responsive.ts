@@ -64,3 +64,18 @@ const SPLIT_AUTH_HERO_WIDTH = 820;
 export function shouldSplitAuthHero(viewportWidth: number): boolean {
   return viewportWidth >= SPLIT_AUTH_HERO_WIDTH;
 }
+
+/**
+ * The narrowest a tile holding one short word stands at system text size 1,
+ * its padding and gap included; a weekday's three letters need less.
+ */
+export const TILE_WIDTH = 92;
+export const WEEKDAY_TILE_WIDTH = 40;
+
+/**
+ * How many of `wanted` tiles fit a row once the system text size applies:
+ * a larger text size takes columns, never letters (`docs/UI.md` section 10).
+ */
+export function tileColumns(contentWidth: number, fontScale: number, wanted: number, tileWidth = TILE_WIDTH): number {
+  return Math.max(1, Math.min(wanted, Math.floor(contentWidth / Math.max(1, fontScale) / tileWidth)));
+}

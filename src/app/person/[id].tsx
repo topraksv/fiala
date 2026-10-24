@@ -15,7 +15,7 @@ import { PERSON_COLORS } from "../../db/schema";
 import { deleteRows, undoRows } from "../../db/mutations";
 import { parseDays, SOON_DAYS, WARN_DAYS_MAX } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
-import { Body, Card, ChoiceTile, IconButton, ListRow, Notice, Screen, SectionHeader, rowsOf } from "../../ui/components";
+import { Body, Card, ChoiceTile, IconButton, ListRow, Missing, rowsOf, Screen, SectionHeader, useTileColumns } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
 import { radioGroupKeys } from "../../ui/keys";
 import { PersonMark, ViewOnly } from "../../ui/named-choices";
@@ -30,6 +30,7 @@ const COLORS = [null, ...PERSON_COLORS] as const;
 const KINDS = ["person", "pet"] as const;
 
 export default function PersonScreen() {
+  const columns = useTileColumns(3);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const people = usePeople();
@@ -40,7 +41,7 @@ export default function PersonScreen() {
   if (!person) {
     return (
       <Screen back="/names/people" title={tr.names.title.people}>
-        {people.status === "loading" ? null : <Notice tone="error" text={tr.person.notFound} />}
+        <Missing query={people} text={tr.person.notFound} />
       </Screen>
     );
   }
@@ -115,7 +116,7 @@ export default function PersonScreen() {
           <SectionHeader>{tr.person.colorSection}</SectionHeader>
           <Body muted style={{ marginBottom: spacing.sm }}>{tr.person.colorHint}</Body>
           <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.person.colorSection} style={{ gap: spacing.sm, marginBottom: spacing.sm }}>
-            {rowsOf(COLORS, 3).map((row, at) => (
+            {rowsOf(COLORS, columns).map((row, at) => (
               <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
                 {row.map((color) => (
                   <ChoiceTile

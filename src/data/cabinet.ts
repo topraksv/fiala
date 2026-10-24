@@ -155,7 +155,8 @@ async function productThere(cabinetId: string, product: Record<string, unknown>)
  * person's own cabinet, not a column, so the box is tombstoned where it was
  * and made afresh there, and every device that held it hears it went. Made
  * private, it keeps its moves and its history. Into a household it arrives
- * now with what it holds, and nothing older: its edits keep every value it
+ * now with what it holds, its doses' moves apart so an answer changed later
+ * puts its dose back, and nothing older: its edits keep every value it
  * ever had, a note deleted since among them, and every member would read
  * them, its arrival dated to its purchase. Its person and place were the old cabinet's: the
  * one of the same name there is taken, or made, as an import does. Its new
@@ -177,13 +178,27 @@ export async function moveBox(packageId: string, cabinetId: string): Promise<{ i
       table: "packages",
       row: { ...shape, id, cabinetId, productId, personId: await nameThere("people", box.person_id, cabinetId, writes), locationId: await nameThere("locations", box.location_id, cabinetId, writes), checkOf: null, checkAskedAt: null },
     });
+    // A dose's move goes with it under the id its answer names, so answered
+    // otherwise later the dose goes back into this box, not the one left.
+    const doses = await sqlite.getAllAsync<Record<string, unknown>>(
+      `SELECT l.*, m.quantity_milli AS dose_milli FROM dose_logs l JOIN package_moves m ON m.id = l.move_id
+        WHERE m.package_id = ? AND m.deleted_at IS NULL AND l.deleted_at IS NULL`,
+      [packageId],
+    );
+    for (const { dose_milli: quantityMilli, ...log } of doses) {
+      const moveId = await deterministicId(naturalKeys.doseMove(String(log.plan_id), String(log.due_on), String(log.due_time), id));
+      writes.push({ table: "package_moves", row: { id: moveId, cabinetId, packageId: id, quantityMilli, reason: "use", createdBy: null } });
+      writes.push(...editRow("dose_logs", log, { moveId }));
+    }
+    // A change's id is never a dose's move, so the second half lets every change by.
+    const undosed = "package_id = ? AND deleted_at IS NULL AND id NOT IN (SELECT move_id FROM dose_logs WHERE move_id IS NOT NULL AND deleted_at IS NULL)";
     const household = await sqlite.getFirstAsync<{ id: string }>("SELECT id FROM cabinets WHERE id = ? AND id <> owner_id", [cabinetId]);
     if (household) {
-      const held = await sqlite.getFirstAsync<{ total: number }>("SELECT COALESCE(SUM(quantity_milli), 0) AS total FROM package_moves WHERE package_id = ? AND deleted_at IS NULL", [packageId]);
+      const held = await sqlite.getFirstAsync<{ total: number }>(`SELECT COALESCE(SUM(quantity_milli), 0) AS total FROM package_moves WHERE ${undosed}`, [packageId]);
       if (held && held.total > 0) writes.push(moveWrite(cabinetId, id, held.total, "initial"));
     } else {
       for (const table of ["package_moves", "package_changes"] as const) {
-        for (const row of await sqlite.getAllAsync<Record<string, unknown>>(`SELECT * FROM ${table} WHERE package_id = ? AND deleted_at IS NULL`, [packageId])) {
+        for (const row of await sqlite.getAllAsync<Record<string, unknown>>(`SELECT * FROM ${table} WHERE ${undosed}`, [packageId])) {
           const { tombstoneVersion: __, ...copy } = fromDbShape(table, row);
           // The server names the mover as the copy's writer (migration 11): until the pull brings that, nobody rather than a name it will not keep.
           writes.push({ table, row: { ...copy, id: uuidv7(), cabinetId, packageId: id, createdBy: null } });

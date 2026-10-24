@@ -25,7 +25,7 @@ import { tr } from "../../i18n/tr";
 import { shareText } from "../../services/share";
 import { syncNow } from "../../sync/engine";
 import { cancelInvites, createInvite, inviteLink, listOffers, offerCabinet, type InviteRole } from "../../sync/sharing";
-import { Body, Button, Card, ChoiceTile, IconButton, ListRow, Notice, Screen, SectionHeader, TextField } from "../../ui/components";
+import { Body, Button, Card, ChoiceTile, IconButton, ListRow, Notice, ReadFailed, Screen, SectionHeader, TextField } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
 import { selectionTap } from "../../ui/haptics";
 import { radioGroupKeys } from "../../ui/keys";
@@ -43,7 +43,14 @@ export default function HouseholdScreen() {
   const router = useRouter();
   const { me, households } = useHouseholds();
   const household = households.data.find((each) => each.id === id);
-  if (!household || !me) return <Screen back="/households" title={households.updatedAt == null ? undefined : tr.households.title} />;
+  if (!household || !me) {
+    // Left, removed or deleted since the link was opened: said, not a blank page.
+    return (
+      <Screen back="/households" title={households.updatedAt == null ? undefined : tr.households.title}>
+        {households.status === "error" ? <ReadFailed queries={[households]} /> : households.updatedAt == null || !me ? null : <Notice tone="error" text={tr.households.notFound} />}
+      </Screen>
+    );
+  }
   const owner = household.ownerId === me;
 
   const rename = async () => {
@@ -125,7 +132,9 @@ function Activity({ cabinetId }: { cabinetId: string }) {
   return (
     <>
       <SectionHeader>{tr.sharing.activity}</SectionHeader>
-      {activity.data.length === 0 ? (
+      {activity.status === "error" ? (
+        <ReadFailed queries={[activity]} />
+      ) : activity.status === "loading" ? null : activity.data.length === 0 ? (
         <Body muted style={{ marginBottom: spacing.md }}>{tr.sharing.noActivity}</Body>
       ) : (
         <Card rows>

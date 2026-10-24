@@ -8,6 +8,8 @@
 
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import BookOpen from "lucide-react-native/icons/book-open";
+import Flag from "lucide-react-native/icons/flag";
 import Package from "lucide-react-native/icons/package";
 import Plus from "lucide-react-native/icons/plus";
 import Star from "lucide-react-native/icons/star";
@@ -19,7 +21,8 @@ import { useCabinet, useHouseholds, usePeople, useTags } from "../../data/hooks"
 import { formatAmount, formatDay, printedGtin } from "../../domain/boxes";
 import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
-import { Button, Card, IconButton, ListRow, Notice, Screen, SectionHeader, ToggleRow } from "../../ui/components";
+import { catalogueByGtin } from "../../services/guide";
+import { Button, Card, IconButton, ListRow, Missing, Screen, SectionHeader, ToggleRow } from "../../ui/components";
 import { appError, appPrompt } from "../../ui/dialog";
 import { LinkedDocuments } from "../../ui/documents";
 import { ProductPlans } from "../../ui/doses";
@@ -50,6 +53,13 @@ function totals(boxes: readonly CabinetBox[]): string | undefined {
 export default function ProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  // The barcode is the one key the cabinet and the list share; a name can match the wrong strength.
+  async function openInGuide(gtin: string) {
+    const found = await catalogueByGtin(gtin);
+    if (!found) return appError(tr.product.guideUnreachable);
+    if (!found[0]) return appError(tr.product.notInGuide);
+    router.push({ pathname: "/medicine/[id]", params: { id: found[0].id } });
+  }
   const cabinet = useCabinet();
   const people = usePeople();
   const allTags = useTags();
@@ -60,7 +70,7 @@ export default function ProductScreen() {
   if (!product) {
     return (
       <Screen back="/cabinet" title={tr.tabs.cabinet}>
-        {cabinet.status === "loading" ? null : <Notice tone="error" text={tr.product.notFound} />}
+        <Missing query={cabinet} text={tr.product.notFound} />
       </Screen>
     );
   }
@@ -183,6 +193,22 @@ export default function ProductScreen() {
         {product.gtin ? <ListRow title={tr.addBox.barcode} subtitle={printedGtin(product.gtin)} /> : null}
         <ListRow title={tr.product.note} subtitle={product.note ?? tr.product.noteEmpty} chevron={editable} onPress={changing(() => void change("note", tr.product.note, 2000))} />
       </Card>
+      {product.gtin ? (
+        <Card rows>
+          <ListRow icon={BookOpen} title={tr.product.inGuide} subtitle={tr.product.inGuideHint} chevron onPress={() => void openInGuide(product.gtin!)} />
+        </Card>
+      ) : null}
+      {product.gtin ? (
+        <View style={{ alignItems: "flex-start", marginTop: spacing.md }}>
+          <Button
+            label={tr.catalogue.report}
+            icon={Flag}
+            variant="ghost"
+            size="sm"
+            onPress={() => router.push({ pathname: "/feedback", params: { category: "data", message: tr.catalogue.reportMessage(product.name, printedGtin(product.gtin!)) } })}
+          />
+        </View>
+      ) : null}
     </Screen>
   );
 }

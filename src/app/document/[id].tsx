@@ -29,7 +29,7 @@ import { formatDay, matchesSearch, parseDay } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
 import { openingTab, shareDocument, showPdf } from "../../services/document-file";
 import { fetchDocumentFile } from "../../sync/documents";
-import { Body, Button, Card, IconButton, ListRow, Notice, Screen, SectionHeader, TextField } from "../../ui/components";
+import { Body, Button, Card, IconButton, ListRow, Missing, Screen, SectionHeader, TextField } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
 import { documentTitle, KINDS, Tiles } from "../../ui/documents";
 import { CabinetChoice, NamedChoices, ViewOnly } from "../../ui/named-choices";
@@ -61,7 +61,7 @@ export default function DocumentScreen() {
   if (!document) {
     return (
       <Screen back="/documents" title={tr.documents.title}>
-        {documents.status === "loading" ? null : <Notice tone="error" text={tr.documents.notFound} />}
+        <Missing query={documents} text={tr.documents.notFound} />
       </Screen>
     );
   }
@@ -224,7 +224,7 @@ function FileCard({ document, title }: { document: CabinetDocument; title: strin
   return (
     <View style={{ gap: spacing.sm, marginBottom: spacing.md }}>
       {shown ? (
-        <Press accessibilityRole="button" accessibilityLabel={`${tr.documents.open}, ${title}`} onPress={() => setEnlarged(true)}>
+        <Press accessibilityRole="button" accessibilityLabel={tr.common.withDetail(tr.documents.open, title)} onPress={() => setEnlarged(true)}>
           <Image
             source={{ uri: `data:image/jpeg;base64,${shown}` }}
             accessible={false}

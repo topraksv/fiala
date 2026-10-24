@@ -271,8 +271,9 @@ if (import.meta.main) {
   const { advisories, accepted, problems } = evaluate(report);
 
   const unregistered = unregisteredPackages(JSON.parse(readFileSync("package-lock.json", "utf8")));
-  const { dependencies = {} } = JSON.parse(readFileSync("package.json", "utf8"));
-  const unaudited = UNAUDITED.filter((e) => e.package in dependencies);
+  // A development dependency installs too: Fiala's xlsx runs only in CI's catalogue import.
+  const { dependencies = {}, devDependencies = {} } = JSON.parse(readFileSync("package.json", "utf8"));
+  const unaudited = UNAUDITED.filter((e) => e.package in dependencies || e.package in devDependencies);
   problems.push(...evaluateUnaudited(unregistered, unaudited));
   for (const entry of unaudited) {
     if (!unregistered.has(entry.package)) continue;
