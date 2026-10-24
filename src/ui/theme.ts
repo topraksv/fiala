@@ -614,6 +614,16 @@ export const authHero = {
   titleScale: 1.3,
   bodyMaxWidth: 470,
   bodyLine: 22,
+  art: { height: 132, heightWide: 286 },
+  bigBlob: { compact: { width: 180, height: 180, top: -105, right: -65 }, wide: { width: 320, height: 320, top: -175, right: -120 }, opacity: 0.68 },
+  smallBlob: { compact: { width: 95, height: 95, bottom: -55, left: -25 }, wide: { width: 170, height: 170, bottom: -90, left: -45 }, opacity: 0.72 },
+  node: 46,
+  nodeIcon: 21,
+  nodeStroke: 1.8,
+  /** The joining line, a hair below the node's centre. */
+  link: { flex: 0.52, top: 23 },
+  bars: [0.72, 0.48, 0.86],
+  bar: { height: 6, dot: 7 },
   noteIcon: 14,
   /** The reset page's round mark over its heading, and the glyph in it. */
   resultMark: 56,

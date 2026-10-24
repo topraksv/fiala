@@ -49,11 +49,12 @@ describe("resetting the data", () => {
   it("leaves a household someone else owns as it is, and empties one the person owns", async () => {
     harness.db!.exec(`INSERT INTO cabinet_members (id, created_at, updated_at, cabinet_id, user_id, role) VALUES
       ('m1', 'x', 'x', 'theirs', 'me', 'editor'), ('m2', 'x', 'x', 'mine', 'me', 'owner'), ('m3', 'x', 'x', 'other', 'someone', 'editor')`);
-    for (const cabinet of ["me", "theirs", "mine", "other"]) {
+    harness.db!.exec("INSERT INTO cabinets (id, created_at, updated_at, deleted_at, owner_id) VALUES ('gone', 'x', 'x', 'x', 'me')");
+    for (const cabinet of ["me", "theirs", "mine", "other", "gone"]) {
       harness.db!.exec(`INSERT INTO locations (id, created_at, updated_at, cabinet_id, name) VALUES ('l-${cabinet}', 'x', 'x', '${cabinet}', 'Mutfak')`);
     }
     expect(await resetData(["cabinet"], "me")).toBe(3);
-    expect(harness.db!.prepare("SELECT cabinet_id FROM locations WHERE deleted_at IS NULL").all(), "a member's reset is no household's").toEqual([{ cabinet_id: "theirs" }]);
+    expect(harness.db!.prepare("SELECT cabinet_id FROM locations WHERE deleted_at IS NULL ORDER BY cabinet_id").all(), "a member's reset is no household's, and a deleted one waits for its undo").toEqual([{ cabinet_id: "gone" }, { cabinet_id: "theirs" }]);
   });
 
   it("holds the consent only at its version, and never from a value it cannot read", async () => {

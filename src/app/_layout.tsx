@@ -252,6 +252,7 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
           <Stack.Protected guard={signedIn}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="sync-issues" />
+            <Stack.Screen name="data-privacy" />
             <Stack.Screen name="data-reset" />
             <Stack.Screen name="account-security" />
             <Stack.Screen name="add-box" />
@@ -276,6 +277,7 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
             <Stack.Screen name="profile" />
             <Stack.Screen name="help" />
             <Stack.Screen name="medicine/[id]" />
+            <Stack.Screen name="medicine/compare" />
             <Stack.Screen name="pharmacies" />
             <Stack.Screen name="pharmacy/[id]" />
           </Stack.Protected>

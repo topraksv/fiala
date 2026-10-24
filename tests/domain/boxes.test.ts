@@ -311,7 +311,7 @@ describe("a catalogue name split into the form's fields", () => {
     expect(split("ARVELES 50 MG/2 ML IM/IV ENJEKSİYONLUK ÇÖZELTİ, 10 AMPUL")).toEqual(["Arveles", "50 mg/2 ml", "im/iv enjeksiyonluk çözelti", "10 ampul"]);
     expect(split("MAJEZIK % 0.25 ORAL SPREY, ÇÖZELTİ, 30 ML"), "the last comma's").toEqual(["Majezik", "% 0.25", "oral sprey, çözelti", "30 ml"]);
     expect(split("Nimejel Plus %1+ %5 Jel, 50 G")).toEqual(["Nimejel Plus", "%1+ %5", "jel", "50 g"]);
-    expect(split("PAROL-K 500 MG/10MG TABLET (20 TABLET)"), "a pack in parentheses").toEqual(["Parol-K", "500 mg/10mg", "tablet", "20 tablet"]);
+    expect(split("PAROL-K 500 MG/10MG TABLET (20 TABLET)"), "a pack in parentheses").toEqual(["Parol-K", "500 mg/10 mg", "tablet", "20 tablet"]);
     expect(split("PAROL 10 MG/ML INFUZYON SOLUSYONU"), "no pack").toEqual(["Parol", "10 mg/ml", "infuzyon solusyonu", null]);
   });
 
@@ -343,5 +343,12 @@ describe("a catalogue name split into the form's fields", () => {
     expect(split("ACYL 200 MG X25 TABLET"), "a number with a letter before it is not a count").toEqual(["Acyl", "200 mg", "x25 tablet", null]);
     expect(split("ACYL 200 MG 25X TABLET"), "nor with a letter after it").toEqual(["Acyl", "200 mg", "25x tablet", null]);
     expect(split("ZOLED 4 MG 5 ML FLAKON"), "before a unit it is a strength").toEqual(["Zoled", "4 mg 5 ml", "flakon", null]);
+    expect(split("FIXOLINE 8MG KAPSÜL"), "a unit written onto its number").toEqual(["Fixoline", "8 mg", "kapsül", null]);
+    expect(split("METHOTREXATE 5GR/50 ML FLAKON"), "grams as GR").toEqual(["Methotrexate", "5 gr/50 ml", "flakon", null]);
+    expect(split("SOLIDAY D3 300.000 I.U./ML AMPUL"), "units as I.U.").toEqual(["Soliday D3", "300.000 i.u./ml", "ampul", null]);
+    expect(split("D-VIT 1000IU DAMLA"), "IU on its number, without the dots").toEqual(["D-Vit", "1000 iu", "damla", null]);
+    expect(split("Apelto 5 mg Film Kaplı Tablet, 56 adet"), "1,517 of the list's names write the unit small").toEqual(["Apelto", "5 mg", "film kaplı tablet", "56 adet"]);
+    expect(split("GEMTU 1000MG/10ML FLAKON"), "each unit apart from its number").toEqual(["Gemtu", "1000 mg/10 ml", "flakon", null]);
+    expect(split("UNACEFIN 0,5G FLAKON")).toEqual(["Unacefin", "0,5 g", "flakon", null]);
   });
 });

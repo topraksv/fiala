@@ -12,6 +12,7 @@
  * forgotten when it passes to another account.
  */
 
+import { tr } from "../i18n/tr";
 import { getSupabase } from "../sync/supabase";
 import { kv, kvList } from "./kv";
 
@@ -191,11 +192,41 @@ export function pharmaciesShown(pharmacies: readonly Pharmacy[], query: string, 
   return kept.sort(from ? (a, b) => distanceKm(from, a) - distanceKm(from, b) || named(a, b) : named);
 }
 
+const DAY = "(?:Mo|Tu|We|Th|Fr|Sa|Su|PH)";
+const SPAN = "\\d{1,2}:\\d\\d\\s*-\\s*\\d{1,2}:\\d\\d";
+const RULE = new RegExp(`^(${DAY}(?:[-,]${DAY})*)?\\s*(off|closed|${SPAN}(?:,${SPAN})*)$`, "iu");
+/** `mo` is written as often as `Mo`, and `9:00` as `09:00`. */
+const dayCode = (day: string) => (day.toUpperCase() === "PH" ? "PH" : day[0]!.toUpperCase() + day[1]!.toLowerCase());
+const clock = (time: string) => time.trim().padStart(5, "0");
+
+/**
+ * OpenStreetMap's `opening_hours` in Turkish, for the forms nearly every
+ * pharmacy carries (`Mo-Sa 09:00-19:00; Su off`, `24/7`; 1,955 of the 1,979
+ * that have one, measured 24.10.2026). Anything else is shown as written: a
+ * half-read rule would state hours the pharmacy does not keep.
+ */
+export function hoursInTurkish(written: string): string {
+  const { days, closed, allDay, always, everyDay, joiner } = tr.pharmacies.openingHours;
+  if (written.trim() === "24/7") return always;
+  const rules = written.split(";").map((rule) => RULE.exec(rule.trim()));
+  if (rules.some((rule) => !rule)) return written;
+  return rules
+    .map((rule) => {
+      const [, when, hours] = rule!;
+      const spans = hours!.split(",").map((span) => span.split("-").map(clock).join("–")).join(", ");
+      const said = /off|closed/iu.test(hours!) ? closed : spans === "00:00–24:00" ? allDay : spans;
+      const named = when ? when.replace(new RegExp(DAY, "giu"), (day) => days[dayCode(day) as keyof typeof days]).replaceAll("-", "–").replaceAll(",", ", ") : everyDay;
+      return `${named} ${said}`;
+    })
+    .join(joiner);
+}
+
 const RECENT_MEDICINES_KEY = "fiala.guide.recentMedicines";
 const STARRED_MEDICINES_KEY = "fiala.guide.starredMedicines";
 const RECENT_PHARMACIES_KEY = "fiala.guide.recentPharmacies";
 const STARRED_PHARMACIES_KEY = "fiala.guide.starredPharmacies";
 const PLACE_KEY = "fiala.guide.place";
+const LOCATION_KEY = "fiala.guide.location";
 
 export const recentMedicines = kvList(RECENT_MEDICINES_KEY, 10);
 export const starredMedicines = kvList(STARRED_MEDICINES_KEY, 15);
@@ -216,7 +247,18 @@ export function savePlace(place: { province: string; district: string | null }):
   return kv.set(PLACE_KEY, JSON.stringify(place)).catch(() => {});
 }
 
+export function forgetPlace(): Promise<void> {
+  return kv.remove(PLACE_KEY).catch(() => {});
+}
+
+/** Whether Eczaneler may ask for the device's location: on until it is turned off in Ayarlar. */
+export const readLocationOn = (): Promise<boolean> => kv.get(LOCATION_KEY).then((value) => value !== "off", () => true);
+
+export function saveLocationOn(on: boolean): Promise<void> {
+  return (on ? kv.remove(LOCATION_KEY) : kv.set(LOCATION_KEY, "off")).catch(() => {});
+}
+
 /** The device passes to another account: what this one opened, starred and chose goes. */
 export async function forgetGuide(): Promise<void> {
-  await Promise.all([...[recentMedicines, starredMedicines, recentPharmacies, starredPharmacies].map((list) => list.forget()), kv.remove(PLACE_KEY)]);
+  await Promise.all([...[recentMedicines, starredMedicines, recentPharmacies, starredPharmacies].map((list) => list.forget()), kv.remove(PLACE_KEY), kv.remove(LOCATION_KEY)]);
 }

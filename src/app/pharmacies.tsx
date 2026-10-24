@@ -12,7 +12,7 @@ import { useRouter } from "expo-router";
 
 import { formatDay } from "../domain/boxes";
 import { tr } from "../i18n/tr";
-import { boxAround, pharmaciesIn, pharmaciesOf, pharmaciesShown, pharmacyPlaces, readPlace, savePlace, type Box, type Pharmacy, type Point } from "../services/guide";
+import { boxAround, pharmaciesIn, pharmaciesOf, pharmaciesShown, pharmacyPlaces, readLocationOn, readPlace, savePlace, type Box, type Pharmacy, type Point } from "../services/guide";
 import { Body, Button, Card, ChoiceTile, ListRow, Notice, ReadFailed, Screen, SectionHeader, TextField } from "../ui/components";
 import { PharmacyRow, useAnswer } from "../ui/guide";
 import { radioGroupKeys } from "../ui/keys";
@@ -67,10 +67,16 @@ export default function PharmaciesScreen() {
   const [shownBox, setShownBox] = useState<Box | null>(null);
   const [chosen, setChosen] = useState<Chosen | null>(null);
 
+  // Off in Ayarlar, the screen never asks for the location and opens on the place.
+  const [locationOn, setLocationOn] = useState(true);
+
   useEffect(() => {
     let live = true;
-    void readPlace().then((saved) => {
-      if (!live || !saved) return;
+    void Promise.all([readLocationOn(), readPlace()]).then(([on, saved]) => {
+      if (!live) return;
+      setLocationOn(on);
+      if (!on) setMode("place");
+      if (!saved) return;
       setChosen((current) => current ?? saved);
       setMode((current) => current ?? "place");
     });
@@ -107,20 +113,24 @@ export default function PharmaciesScreen() {
 
   return (
     <Screen back="/guide" title={tr.pharmacies.title}>
-      <Tiles
-        label={tr.pharmacies.title}
-        options={[
-          { value: "near", label: tr.pharmacies.nearMe },
-          { value: "place", label: tr.pharmacies.byPlace },
-        ]}
-        value={mode}
-        onChoose={(next) => {
-          if (next === "near") return void locate();
-          setShownBox(null);
-          setMode(next);
-        }}
-      />
-      <Body muted style={{ marginBottom: spacing.md }}>{tr.pharmacies.locationNote}</Body>
+      {locationOn ? (
+        <>
+          <Tiles
+            label={tr.pharmacies.title}
+            options={[
+              { value: "near", label: tr.pharmacies.nearMe },
+              { value: "place", label: tr.pharmacies.byPlace },
+            ]}
+            value={mode}
+            onChoose={(next) => {
+              if (next === "near") return void locate();
+              setShownBox(null);
+              setMode(next);
+            }}
+          />
+          <Body muted style={{ marginBottom: spacing.md }}>{tr.pharmacies.locationNote}</Body>
+        </>
+      ) : null}
       {mode === "near" ? <Locating located={located} onRetry={() => void locate()} /> : null}
       {mode === "place" ? <PlacePicker chosen={chosen} onChoose={choose} /> : null}
       <Results

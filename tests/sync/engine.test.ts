@@ -1220,6 +1220,52 @@ describe("a shared cabinet", () => {
     }
     expect(await on("A", () => remainingMilli(mine)), "A's own cabinet stays").toBe(20_000);
   });
+
+  it("keeps a deleted household's rows from a device that first fetches it then, and brings them with the undo", async () => {
+    const { box } = await joined();
+    const deleted = await on("C", async () => (await sync(), await deleteRows("cabinets", [HOUSE]))!);
+    await on("C", sync);
+    await on("A", sync);
+    expect(count(devices.A, `SELECT COUNT(*) AS n FROM packages WHERE cabinet_id = '${HOUSE}'`), "the server hid them").toBe(0);
+    expect(count(devices.A, `SELECT COUNT(*) AS n FROM cabinets WHERE id = '${HOUSE}' AND deleted_at IS NOT NULL`), "but said the delete").toBe(1);
+    await on("C", async () => {
+      await undoRows(deleted);
+      await sync();
+    });
+    await on("A", async () => {
+      await sync();
+      expect(await remainingMilli(box)).toBe(200_000);
+    });
+    expect(devices.A.prepare("SELECT table_name FROM sync_state WHERE table_name LIKE 'cabinet:%' ORDER BY table_name").all()).toEqual([
+      { table_name: `cabinet:${HOUSE}@0` },
+      { table_name: `cabinet:${HOUSE}~1` },
+    ]);
+    cloud.requests.length = 0;
+    await on("A", sync);
+    expect(cloud.requests.filter((request) => request === "select packages"), "once a delete").toEqual([]);
+  });
+
+  it("sends again, once the household is back, what the server refused while it was deleted", async () => {
+    const { box } = await joined();
+    await on("A", sync);
+    const deleted = await on("C", async () => (await sync(), await deleteRows("cabinets", [HOUSE]))!);
+    await on("C", sync);
+    await on("A", async () => {
+      await takeFrom(box, 1000);
+      await sync();
+    });
+    expect(count(devices.A, "SELECT COUNT(*) AS n FROM sync_dead_letters"), "refused into a deleted household").toBe(1);
+    expect(useSyncStatus.getState().state, "kept for the undo, it asks nothing of A").toBe("idle");
+    await on("C", async () => {
+      await undoRows(deleted);
+      await sync();
+    });
+    await on("A", sync);
+    expect(count(devices.A, "SELECT COUNT(*) AS n FROM sync_dead_letters")).toBe(0);
+    await on("A", sync);
+    expect(await on("C", async () => (await sync(), remainingMilli(box)))).toBe(199_000);
+    expect(await on("A", () => remainingMilli(box)), "A kept its use through the fetch").toBe(199_000);
+  });
 });
 
 describe("an invitation into a household (F2.2)", () => {
@@ -1469,7 +1515,7 @@ describe("documents", () => {
     const unnamed = cloud.documentObjects.get(`${fileId}/file.pdf`)!;
     for (let at = 1; at < 200; at += 1) cloud.documentObjects.set(`0190d000-0000-7000-8000-${String(at).padStart(12, "0")}/file.pdf`, { ...unnamed });
     for (const object of cloud.documentObjects.values()) object.at -= 31 * 86_400_000;
-    devices.C.prepare("INSERT INTO document_files (id, data, created_at) VALUES ('unsent', ?, ?)").run(PDF, new Date().toISOString());
+    devices.C.prepare("INSERT INTO document_files (id, data, created_at) VALUES ('unsent', ?, ?)").run(PDF, new Date(Date.now() - 29 * 86_400_000).toISOString());
     const before = cloud.requests.length;
     await on("C", () => sync());
     expect(cloud.requests.slice(before).filter((request) => request.startsWith("remove")), "a hundred at a time").toEqual(["remove 100", "remove 100"]);

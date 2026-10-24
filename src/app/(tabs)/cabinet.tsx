@@ -11,6 +11,7 @@ import House from "lucide-react-native/icons/house";
 import Package from "lucide-react-native/icons/package";
 import Pill from "lucide-react-native/icons/pill";
 import Plus from "lucide-react-native/icons/plus";
+import SlidersHorizontal from "lucide-react-native/icons/sliders-horizontal";
 import Trash from "lucide-react-native/icons/trash";
 import X from "lucide-react-native/icons/x";
 
@@ -86,6 +87,8 @@ export default function Cabinet() {
   const [filed, setFiled] = useState<string | null>(null);
   const [view, setView] = useState<BoxView>("home");
   const [compact, setCompact] = useState(false);
+  // Sorting and the filters fold under one button, so the boxes start near the top; its label counts what is chosen.
+  const [sifting, setSifting] = useState(false);
   // A Durum card's list: its filter alone, nothing left over from the last look.
   useFocusEffect(
     useCallback(() => {
@@ -134,6 +137,7 @@ export default function Cabinet() {
   // Each tile before the tags only while it would find something.
   const first = [...(anyStarred ? [{ id: STARRED, name: tr.cabinet.starred }] : []), ...(linked.size > 0 ? [{ id: LINKED, name: tr.documents.linked }] : [])];
   const tag = [...first, ...tags].some((each) => each.id === filed) ? filed : null;
+  const chosenCount = [sort !== "expiry", view !== "home", person, place, tag].filter(Boolean).length;
   const shown = visible(cabinet.data, { query, sort, view, person, place, tag, linked, today, ownerOf: (id) => nameOf(people, id) });
   // A box of a household the person only reads is never chosen: everything chosen is changed.
   const selection = useSelection(shown.flatMap((product) => product.boxes).filter((box) => writes(box.cabinetId)));
@@ -224,27 +228,41 @@ export default function Cabinet() {
             maxLength={80}
             style={{ marginBottom: spacing.sm }}
           />
-          <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.cabinet.sortBy} style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-            {rowsOf(SORTS, columns).map((row, at) => (
-              <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
-                {row.map((value) => (
-                  <ChoiceTile key={value} label={tr.cabinet.sorts[value]} selected={sort === value} minHeight={controlSize.minimumTarget} onPress={() => setSort(value)} />
+          <View style={{ alignItems: "flex-start", marginBottom: spacing.sm }}>
+            <Button
+              label={chosenCount > 0 ? tr.cabinet.siftChosen(chosenCount) : tr.cabinet.sift}
+              icon={SlidersHorizontal}
+              variant="secondary"
+              size="sm"
+              expanded={sifting}
+              onPress={() => setSifting(!sifting)}
+            />
+          </View>
+          {sifting ? (
+            <>
+              <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.cabinet.sortBy} style={{ gap: spacing.sm, marginBottom: spacing.md }}>
+                {rowsOf(SORTS, columns).map((row, at) => (
+                  <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
+                    {row.map((value) => (
+                      <ChoiceTile key={value} label={tr.cabinet.sorts[value]} selected={sort === value} minHeight={controlSize.minimumTarget} onPress={() => setSort(value)} />
+                    ))}
+                  </View>
                 ))}
               </View>
-            ))}
-          </View>
-          <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.cabinet.viewBy} style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-            {rowsOf(BOX_VIEWS, columns).map((row, at) => (
-              <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
-                {row.map((value) => (
-                  <ChoiceTile key={value} label={tr.cabinet.views[value]} selected={view === value} minHeight={controlSize.minimumTarget} onPress={() => setView(value)} />
+              <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.cabinet.viewBy} style={{ gap: spacing.sm, marginBottom: spacing.md }}>
+                {rowsOf(BOX_VIEWS, columns).map((row, at) => (
+                  <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
+                    {row.map((value) => (
+                      <ChoiceTile key={value} label={tr.cabinet.views[value]} selected={view === value} minHeight={controlSize.minimumTarget} onPress={() => setView(value)} />
+                    ))}
+                  </View>
                 ))}
               </View>
-            ))}
-          </View>
-          <Filter table="people" named={people} chosen={person} onChoose={setWhose} />
-          <Filter table="locations" named={locations} chosen={place} onChoose={setWhere} />
-          <Filter table="tags" named={tags} first={first} chosen={tag} onChoose={setFiled} />
+              <Filter table="people" named={people} chosen={person} onChoose={setWhose} />
+              <Filter table="locations" named={locations} chosen={place} onChoose={setWhere} />
+              <Filter table="tags" named={tags} first={first} chosen={tag} onChoose={setFiled} />
+            </>
+          ) : null}
           {shown.length === 0 ? <Body muted>{query.trim() ? tr.cabinet.noMatch(query.trim()) : tr.cabinet.noFiltered}</Body> : null}
           {shown.map((product) => (
             <Card key={product.id} rows>

@@ -1,6 +1,6 @@
 /**
  * One document (`docs/TASKS.md` F3.2–F3.5): its file opened, shared or
- * downloaded; what is written on it, each field saved as it is chosen, as on
+ * downloaded, a leaflet's read in its sections (F5.2); what is written on it, each field saved as it is chosen, as on
  * a box's page; the medicines and boxes it is linked to; who sees it; and its
  * archive and deletion, each with an undo. Its file reaches the device when it
  * is first opened here (`fetchDocumentFile`), a photo's as the page opens.
@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { Image, Platform, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import Archive from "lucide-react-native/icons/archive";
+import BookOpen from "lucide-react-native/icons/book-open";
 import ArchiveRestore from "lucide-react-native/icons/archive-restore";
 import Download from "lucide-react-native/icons/download";
 import ExternalLink from "lucide-react-native/icons/external-link";
@@ -26,18 +27,27 @@ import { archiveDocuments, deleteDocuments, editDocument, linkDocument, movableB
 import { useCabinet, useDocuments, useHouseholds, usePeople } from "../../data/hooks";
 import { undoRows } from "../../db/mutations";
 import { formatDay, matchesSearch, parseDay } from "../../domain/boxes";
+import { leafletOf, type Leaflet } from "../../domain/leaflet";
 import { tr } from "../../i18n/tr";
 import { openingTab, shareDocument, showPdf } from "../../services/document-file";
 import { fetchDocumentFile } from "../../sync/documents";
+import { bytesOf } from "../../sync/photos";
 import { Body, Button, Card, IconButton, ListRow, Missing, Screen, SectionHeader, TextField } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
-import { documentTitle, KINDS, Tiles } from "../../ui/documents";
+import { documentTitle, KINDS, LeafletSections, Tiles } from "../../ui/documents";
 import { CabinetChoice, NamedChoices, ViewOnly } from "../../ui/named-choices";
 import { navigateBack } from "../../ui/navigation";
 import { PhotoViewer } from "../../ui/photo-viewer";
 import { Press } from "../../ui/press";
 import { photoPreview, radius, spacing, useTheme } from "../../ui/theme";
 import { showUndo } from "../../ui/undo";
+
+/** A PDF's leaflet sections, or none. The reader and its inflater are loaded on the tap, out of every other page's bytes. */
+async function leafletIn(base64: string): Promise<Leaflet | null> {
+  const { extractPdfText } = await import("../../services/pdf-text");
+  const text = await extractPdfText(bytesOf(base64));
+  return text.ok ? leafletOf(text.text) : null;
+}
 
 /** Matches offered at once while linking: a search narrows the rest. */
 const LINK_OFFERS = 8;
@@ -175,6 +185,7 @@ function FileCard({ document, title }: { document: CabinetDocument; title: strin
   const { fileId, fileType } = document;
   const [image, setImage] = useState<{ id: string; data: string } | null>(null);
   const [enlarged, setEnlarged] = useState(false);
+  const [leaflet, setLeaflet] = useState<{ id: string; read: Leaflet | null } | null>(null);
   // A photo is fetched as the page opens, to be drawn; a PDF waits for its tap.
   useEffect(() => {
     if (!fileId || fileType !== "jpeg") return;
@@ -215,6 +226,10 @@ function FileCard({ document, title }: { document: CabinetDocument; title: strin
     if (!data) return tab?.close();
     await showPdf(tab, data, title).catch(() => appError(tr.documents.fileFailed));
   };
+  const readLeaflet = async () => {
+    const data = await read();
+    if (data) setLeaflet({ id: fileId, read: await leafletIn(data) });
+  };
   const share = async () => {
     const data = await read();
     if (data) await shareDocument(data, fileType, title).catch(() => appError(tr.documents.fileFailed));
@@ -241,7 +256,9 @@ function FileCard({ document, title }: { document: CabinetDocument; title: strin
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
         <Button label={tr.documents.open} icon={ExternalLink} onPress={() => void open()} />
         <Button label={web ? tr.documents.download : tr.documents.share} icon={web ? Download : Share} variant="secondary" onPress={() => void share()} />
+        {fileType === "pdf" ? <Button label={tr.documents.readLeaflet} icon={BookOpen} variant="secondary" onPress={() => void readLeaflet().catch(() => appError(tr.documents.fileFailed))} /> : null}
       </View>
+      {leaflet?.id === fileId ? <LeafletSections leaflet={leaflet.read} /> : null}
     </View>
   );
 }

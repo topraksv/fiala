@@ -1,6 +1,7 @@
 /**
  * A dose plan as every list draws it (`docs/TASKS.md` F3.7, F3.9): the
- * calendar's, and a product's own, which adds one for that medicine.
+ * calendar's, and a product's own, which adds one for that medicine; and
+ * answering a dose, from the calendar or from Durum.
  */
 
 import { View } from "react-native";
@@ -8,12 +9,16 @@ import { useRouter } from "expo-router";
 import Pill from "lucide-react-native/icons/pill";
 import Plus from "lucide-react-native/icons/plus";
 
-import type { CabinetDosePlan } from "../data/doses";
+import { answerDose, type CabinetDosePlan, type Writes } from "../data/doses";
 import { useDosePlans, usePeople } from "../data/hooks";
 import { formatAmount, formatDay, localDay } from "../domain/boxes";
 import { EVERY_DAY, timesOf } from "../domain/doses";
 import { tr } from "../i18n/tr";
+import type { DoseStatus } from "../db/schema";
+import { undoRows } from "../db/mutations";
 import { Button, Card, ListRow, SectionHeader } from "./components";
+import { appError } from "./dialog";
+import { showUndo } from "./undo";
 import { spacing } from "./theme";
 
 /** A plan's days as a reader says them: every day, or the days by name. */
@@ -65,4 +70,14 @@ export function ProductPlans({ productId, editable }: { productId: string; edita
       ) : null}
     </>
   );
+}
+
+/** Answer a dose, or take its answer back, saying so with an undo. */
+export async function answerWithUndo(dose: { planId: string; dueOn: string; dueTime: string }, status: DoseStatus | null, writes: Writes): Promise<void> {
+  try {
+    const written = await answerDose(dose.planId, dose, status, { writes });
+    if (written.writes.length > 0) showUndo(status ? tr.doses.answered(tr.doses.states[status]) : tr.doses.cleared, () => undoRows(written));
+  } catch {
+    await appError(tr.errors.saveFailed);
+  }
 }

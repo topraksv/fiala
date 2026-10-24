@@ -106,19 +106,28 @@ export class FakeCloud {
     return this.rows("cabinet_members").find((row) => row.cabinet_id === cabinet && row.user_id === uid && row.deleted_at == null);
   }
 
-  /** `private.can_read_cabinet` and `private.can_write_cabinet`. */
-  private canRead(cabinet: unknown, uid: string): boolean {
+  /** `private.in_cabinet`, which still sees a deleted household (migration 18). */
+  private inCabinet(cabinet: unknown, uid: string): boolean {
     return this.isOwner(cabinet, uid) || this.membership(cabinet, uid) != null;
   }
 
+  private live(cabinet: unknown): boolean {
+    return this.tables.get("cabinets")!.get(String(cabinet))?.deleted_at == null;
+  }
+
+  /** `private.can_read_cabinet` and `private.can_write_cabinet`: a deleted household's rows neither read nor written. */
+  private canRead(cabinet: unknown, uid: string): boolean {
+    return this.live(cabinet) && this.inCabinet(cabinet, uid);
+  }
+
   private canWrite(cabinet: unknown, uid: string): boolean {
-    return this.isOwner(cabinet, uid) || this.membership(cabinet, uid)?.role === "editor";
+    return this.live(cabinet) && (this.isOwner(cabinet, uid) || this.membership(cabinet, uid)?.role === "editor");
   }
 
   private visible(table: string, row: Row, uid: string): boolean {
     if (table === "settings") return row.user_id === uid;
-    if (table === "cabinets") return this.canRead(row.id, uid);
-    if (table === "cabinet_members") return row.user_id === uid || this.canRead(row.cabinet_id, uid);
+    if (table === "cabinets") return this.inCabinet(row.id, uid);
+    if (table === "cabinet_members") return row.user_id === uid || this.inCabinet(row.cabinet_id, uid);
     return this.canRead(row.cabinet_id, uid);
   }
 

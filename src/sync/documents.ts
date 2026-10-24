@@ -73,8 +73,6 @@ export async function fetchDocumentFile(fileId: string, type: DocumentFileType):
   return base64;
 }
 
-/** As a photo's: a device may hold the row naming a file unsent. */
-const UNNAMED_KEPT_MS = 30 * 86_400_000;
 const swept = new WeakSet<AbortSignal>();
 
 /**
@@ -87,7 +85,8 @@ export async function sweepUnnamedDocuments(supabase: SupabaseClient, signal: Ab
   if (swept.has(signal)) return;
   swept.add(signal);
   const sqlite = await getSqliteAsync();
-  const before = new Date(Date.now() - UNNAMED_KEPT_MS).toISOString();
+  // A month, as a photo's: a device may hold the row naming a file unsent. Inside the function, not a module constant, so its mutant is mapped to the test that kills it.
+  const before = new Date(Date.now() - 30 * 86_400_000).toISOString();
   await sqlite.runAsync(`DELETE FROM document_files WHERE id NOT IN (${NAMED}) AND (uploaded_at IS NOT NULL OR created_at < ?)`, [before]);
   const { data, error } = await supabase.rpc("unnamed_documents");
   if (error) return;

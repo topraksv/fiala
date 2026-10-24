@@ -11,6 +11,7 @@
 import { useEffect } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import ArrowLeftRight from "lucide-react-native/icons/arrow-left-right";
 import FileText from "lucide-react-native/icons/file-text";
 import Flag from "lucide-react-native/icons/flag";
 import Package from "lucide-react-native/icons/package";
@@ -87,8 +88,9 @@ export default function MedicineScreen() {
       <Card rows>
         <ListRow icon={FileText} title={tr.medicine.leaflet} subtitle={tr.medicine.leafletHint} onPress={() => void openLink(`${LEAFLETS}?search=${encodeURIComponent(name)}`)} />
       </Card>
-      <View style={{ alignItems: "flex-start", marginBottom: spacing.md }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.md }}>
         <Button label={tr.medicine.addToCabinet} icon={Plus} onPress={() => router.push({ pathname: "/add-box", params: { listed: entry.id } })} />
+        <Button label={tr.compare.open} icon={ArrowLeftRight} variant="secondary" onPress={() => router.push({ pathname: "/medicine/compare", params: { a: entry.id } })} />
       </View>
 
       <AtHome entry={entry} />

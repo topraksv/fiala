@@ -859,6 +859,7 @@ export function Button({
   loading = false,
   icon: Icon,
   size = "md",
+  expanded,
 }: {
   label: string;
   onPress: () => void;
@@ -867,6 +868,8 @@ export function Button({
   loading?: boolean;
   icon?: LucideIcon;
   size?: "md" | "sm";
+  /** Set on a button that shows and hides what follows it, as Helix's does. */
+  expanded?: boolean;
 }) {
   const { palette } = useTheme();
   const small = size === "sm";
@@ -876,7 +879,8 @@ export function Button({
     <Press
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled: disabled || loading, busy: loading }}
+      aria-expanded={expanded}
+      accessibilityState={{ disabled: disabled || loading, busy: loading, expanded }}
       disabled={disabled || loading}
       onPress={onPress}
       style={(state) => ({

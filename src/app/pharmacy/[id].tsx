@@ -16,7 +16,7 @@ import Star from "lucide-react-native/icons/star";
 
 import { formatDay } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
-import { pharmaciesById, recentPharmacies, starredPharmacies, type Pharmacy } from "../../services/guide";
+import { hoursInTurkish, pharmaciesById, recentPharmacies, starredPharmacies, type Pharmacy } from "../../services/guide";
 import { Body, Card, IconButton, ListRow, Missing, Screen } from "../../ui/components";
 import { callLink, correctionLink, directionsLink, mapLink, openLink, pharmacyName, useAnswer, useRemembered } from "../../ui/guide";
 import { spacing } from "../../ui/theme";
@@ -67,7 +67,7 @@ export default function PharmacyScreen() {
     >
       <Card rows>
         <ListRow icon={MapPin} title={pharmacy.address ?? place} subtitle={pharmacy.address ? place : tr.pharmacies.address} />
-        {pharmacy.openingHours ? <ListRow icon={Clock} title={pharmacy.openingHours} subtitle={tr.pharmacies.hours} /> : null}
+        {pharmacy.openingHours ? <ListRow icon={Clock} title={hoursInTurkish(pharmacy.openingHours)} subtitle={tr.pharmacies.hours} /> : null}
         {pharmacy.phone ? <ListRow icon={Phone} title={pharmacy.phone} subtitle={tr.pharmacies.call} onPress={() => void openLink(callLink(pharmacy.phone!))} /> : null}
       </Card>
       <Card rows>

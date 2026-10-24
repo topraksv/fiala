@@ -9,6 +9,7 @@
  */
 
 import { getSqliteAsync } from "../db/client";
+import { inLiveCabinet } from "./cabinet";
 import { fromDbShape, nowIso, writeRows, type RowSnapshot, type RowWrite } from "../db/mutations";
 import type { SyncedTableName } from "../db/schema";
 import { HEALTH_CONSENT } from "./settings";
@@ -54,7 +55,8 @@ async function chosenRows(scopes: readonly ResetScope[], me: string, parts: Part
   for (const [table, which] of scopes.flatMap((scope) => parts[scope] ?? [])) {
     // Every table a part names is a cabinet's, but for the settings.
     const scoped = table !== "settings";
-    const own = scoped ? ` AND cabinet_id NOT IN (${THEIRS})` : "";
+    // A deleted household's rows wait for its undo, and the server refuses a write into it.
+    const own = scoped ? ` AND cabinet_id NOT IN (${THEIRS}) AND ${inLiveCabinet("cabinet_id")}` : "";
     for (const row of await sqlite.getAllAsync<RowSnapshot>(`SELECT * FROM ${table} WHERE deleted_at IS NULL AND (${which})${own}`, scoped ? [me] : [])) {
       rows.set(`${table}:${String(row.id)}`, [table, row]);
     }

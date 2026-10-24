@@ -339,9 +339,14 @@ export function sortProducts<P extends { name: string; boxes: readonly SortedBox
   return [...products].sort((a, b) => compare[sort](a, b) || byName(a, b));
 }
 
-/** A word of a strength: a number, a percentage, a unit, or a unit per amount ("MG/2"), as TİTCK writes them. */
+/**
+ * A word of a strength: a number, a percentage, a unit, a unit per amount
+ * ("MG/2"), or a number with its unit on it ("10MG"), as TİTCK writes them;
+ * grams also as GR, units also as I.U.
+ */
 const BARE = /^\d[\d.,]*$/u;
-const STRENGTH_WORD = /^(?:%?\d[\d.,]*%?\+?|%|\+|\/|(?:MCG|MG|µG|G|ML|L|IU|MIU|IU\/ML|DOZ)(?:\/[\d.,]*(?:MCG|MG|G|ML|L|DOZ)?)?)$/iu;
+const UNIT = "(?:MCG|MG|µG|GR|G|ML|L|M?I\\.?U\\.?|DOZ)(?:\\/[\\d.,]*(?:MCG|MG|GR|G|ML|L|DOZ)?)?";
+const STRENGTH_WORD = new RegExp(`^(?:%?\\d[\\d.,]*(?:${UNIT})?%?\\+?|%|\\+|\\/|${UNIT})$`, "iu");
 // TİTCK writes a Latin name's i as a plain I ("MAJEZIK"), so an I lowers to i, not to a dotless ı.
 const lowered = (words: string) => words.replace(/İ/g, "i").toLowerCase();
 const titled = (words: string) => lowered(words).replace(/(^|[\s-])(\p{L})/gu, (_, gap: string, letter: string) => gap + letter.toLocaleUpperCase("tr-TR"));
@@ -379,7 +384,8 @@ export function catalogueFields(listed: string): { name: string; strength: strin
   const form = words.slice(count ? end + 1 : hasUnit ? end : first).join(" ");
   return {
     name: titled(words.slice(0, first).join(" ")),
-    strength: hasUnit ? lower(measured.join(" ")) : null,
+    // "500MG" reads as "500 mg", so two medicines' strengths compare as written alike.
+    strength: hasUnit ? lowered(measured.join(" ")).replace(/(\d)(?=(?:mcg|mg|µg|gr|g|ml|l|m?i\.?u\.?|doz)(?![a-zµ]))/gu, "$1 ") : null,
     form: lower(form),
     pack: pack ?? (count ? lower(`${count} ${form}`.trim()) : null),
   };

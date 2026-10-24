@@ -6,7 +6,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(49);
+select extensions.plan(60);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -189,6 +189,43 @@ select is(
 update public.products set note = 'X' where id = 'a1000000-0000-7000-8000-00000000000a';
 set local role postgres;
 select is((select note from public.products where id = 'a1000000-0000-7000-8000-00000000000a'), null, 'and changes nothing');
+
+-- A deleted household (migration 18): its rows leave every read and refuse
+-- every write, while its own row and its members still tell each device of
+-- the delete and of the undo.
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+update public.cabinets set deleted_at = now() where id = 'c0000000-0000-7000-8000-00000000000c';
+create temp table before_undo as select tombstone_version as generation from public.cabinets where id = 'c0000000-0000-7000-8000-00000000000c';
+select is((select count(*) from public.products where cabinet_id = 'c0000000-0000-7000-8000-00000000000c'), 0::bigint, 'a deleted household''s rows are hidden from its owner');
+select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000002', true);
+select is((select count(*) from public.products where cabinet_id = 'c0000000-0000-7000-8000-00000000000c'), 0::bigint, 'and from its members');
+select is((select count(*) from public.packages where cabinet_id = 'c0000000-0000-7000-8000-00000000000c'), 0::bigint, 'every table of it');
+select isnt((select deleted_at from public.cabinets where id = 'c0000000-0000-7000-8000-00000000000c'), null, 'but its row says it was deleted');
+select is((select count(*) from public.cabinet_members where cabinet_id = 'c0000000-0000-7000-8000-00000000000c'), 3::bigint, 'and its members are still known');
+select is(
+  pg_temp.exec_sqlstate($$insert into public.products (cabinet_id, id, name) values ('c0000000-0000-7000-8000-00000000000c', 'a7000000-0000-7000-8000-00000000000a', 'Yeni')$$),
+  '42501',
+  'nothing is added to it'
+);
+select is(
+  pg_temp.exec_sqlstate($$insert into public.products (cabinet_id, id, name) values ('c0000000-0000-7000-8000-00000000000c', 'a1000000-0000-7000-8000-00000000000a', 'Değişti')
+    on conflict (cabinet_id, id) do update set name = excluded.name returning id$$),
+  '42501',
+  'nor changed in it, as a push upserts'
+);
+select is(private.in_cabinet('c0000000-0000-7000-8000-00000000000c'), true, 'its members are still in it');
+select is(private.can_read_cabinet('c0000000-0000-7000-8000-00000000000c'), false, 'but read none of it');
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+update public.cabinets set deleted_at = null where id = 'c0000000-0000-7000-8000-00000000000c';
+select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000002', true);
+select is((select count(*) from public.products where cabinet_id = 'c0000000-0000-7000-8000-00000000000c'), 1::bigint, 'the undo brings its rows back');
+set local role postgres;
+select is(
+  (select tombstone_version from public.cabinets where id = 'c0000000-0000-7000-8000-00000000000c'),
+  (select generation from before_undo),
+  'under the delete''s generation, which keys the device''s fetch of it whole'
+);
 
 -- A, the owner.
 select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);

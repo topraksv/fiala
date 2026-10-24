@@ -22,19 +22,22 @@ import ShoppingBasket from "lucide-react-native/icons/shopping-basket";
 import SlidersHorizontal from "lucide-react-native/icons/sliders-horizontal";
 
 import type { CabinetBox, CabinetProduct } from "../../data/cabinet";
+import type { CabinetDosePlan } from "../../data/doses";
 import { useDoseAnswers, useDosePlans, useHouseholds, usePeople, useShownCabinet } from "../../data/hooks";
 import { OPENED_SOON_DAYS, SOON_DAYS, daysUntil, expiryState, formatAmount, formatDay, inView, isEmpty, isLow, lastOpenDay, localDay, matchesSearch, type BoxView, type ExpiryState } from "../../domain/boxes";
-import { dosesOfDay } from "../../domain/doses";
+import { dosesOfDay, type DayDose } from "../../domain/doses";
 import { tr } from "../../i18n/tr";
 import { canScan } from "../../services/barcode-scan";
 import { Attention } from "../../ui/attention";
 import { openCabinet } from "../../ui/cabinet-link";
 import { Body, Button, Card, EmptyState, IconButton, ListRow, Notice, ReadFailed, Screen, SectionHeader, TextField } from "../../ui/components";
 import { PersonMark } from "../../ui/named-choices";
+import { answerWithUndo } from "../../ui/doses";
 import { useNotices } from "../../ui/notices";
 import { readCardLayout, layoutFrom, type CardLayout, type StatusCard } from "../../ui/status-cards";
 import { spacing, type, useTheme } from "../../ui/theme";
 import { FirstRunTour } from "../../ui/tour";
+import { WorkspaceGrid } from "../../ui/workspace-layout";
 
 type Held = { product: CabinetProduct; box: CabinetBox };
 
@@ -98,6 +101,14 @@ function HomeCheck({ home, subtitle, open }: { home: Held[]; subtitle: (box: Cab
       ) : null}
     </>
   );
+}
+
+/** Its time come, the next dose is answered on Durum in one tap; the calendar keeps the other answers. */
+function TakeNow({ dose, plans }: { dose: DayDose | undefined; plans: readonly CabinetDosePlan[] }) {
+  const { writes } = useHouseholds();
+  const plan = plans.find((each) => each.id === dose?.planId);
+  if (dose?.state !== "due" || !plan || !writes(plan.cabinetId)) return null;
+  return <Button label={tr.doses.answers.taken} size="sm" onPress={() => void answerWithUndo(dose, "taken", writes)} />;
 }
 
 /**
@@ -204,6 +215,7 @@ export default function Status() {
               subtitle={tr.doses.todayCount(doses.filter((dose) => dose.state === "taken").length, doses.length)}
               chevron
               onPress={() => router.push("/doses")}
+              right={<TakeNow dose={next} plans={plans} />}
             />,
           ]),
     lists: card(tr.status.listsSection, [
@@ -236,6 +248,7 @@ export default function Status() {
   return (
     <Screen
       title={tr.tabs.status}
+      width="workspace"
       actions={
         <View style={{ flexDirection: "row", gap: spacing.xs }}>
           <IconButton icon={SlidersHorizontal} label={tr.statusCards.title} onPress={() => router.push("/status-cards")} />
@@ -265,7 +278,9 @@ export default function Status() {
       </Card>
       <HomeCheck home={home} subtitle={printed} open={open} />
       {by.expired.length + by.soon.length + opened.length === 0 ? <Notice tone="success" text={tr.status.allGood} /> : null}
-      {layout?.order.filter((id) => !layout.hidden.includes(id)).map((id) => <Fragment key={id}>{cards[id]}</Fragment>)}
+      <WorkspaceGrid>
+        {layout?.order.filter((id) => !layout.hidden.includes(id) && cards[id] != null).map((id) => <Fragment key={id}>{cards[id]}</Fragment>)}
+      </WorkspaceGrid>
       <FirstRunTour />
     </Screen>
   );

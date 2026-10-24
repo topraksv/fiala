@@ -29,7 +29,7 @@ vi.mock("../../src/sync/supabase", () => ({
       : null,
 }));
 
-const { boxAround, boxOfRegion, catalogueByGtin, catalogueEntry, catalogueRelated, distanceKm, forgetGuide, pharmaciesById, pharmaciesIn, pharmaciesOf, pharmaciesShown, pharmacyPlaces, readPlace, savePlace, searchCatalogue } = await import("../../src/services/guide");
+const { boxAround, boxOfRegion, catalogueByGtin, hoursInTurkish, catalogueEntry, catalogueRelated, distanceKm, forgetGuide, forgetPlace, pharmaciesById, pharmaciesIn, pharmaciesOf, pharmaciesShown, pharmacyPlaces, readLocationOn, readPlace, saveLocationOn, savePlace, searchCatalogue } = await import("../../src/services/guide");
 
 const row = (id: string, gtin: string | null, suspended = false) => ({ id, gtin, name: `N${id}`, active_substance: "s", atc: "A", holder: "h", suspended, listed_on: "2026-10-23" });
 
@@ -155,6 +155,40 @@ describe("asking for pharmacies", () => {
   });
 });
 
+describe("a pharmacy's hours", () => {
+  it("reads OpenStreetMap's usual forms into Turkish and shows any other as written", () => {
+    expect(hoursInTurkish("Mo-Sa 09:00-19:00; Su off")).toBe("Pzt–Cmt 09:00–19:00 · Paz kapalı");
+    expect(hoursInTurkish("Mo-Fr 08:30-12:30,13:30-19:00; Sa 09:00-14:00; Su,PH closed")).toBe("Pzt–Cum 08:30–12:30, 13:30–19:00 · Cmt 09:00–14:00 · Paz, Resmî tatil kapalı");
+    expect(hoursInTurkish(" 24/7 ")).toBe("Her gün 24 saat");
+    expect(hoursInTurkish("Mo-Su 00:00-24:00")).toBe("Pzt–Paz 24 saat");
+    expect(hoursInTurkish("09:00-21:00"), "no days is every day").toBe("Her gün 09:00–21:00");
+    expect(hoursInTurkish("Mo-Fr 09:00-19:00, Sa 09:00-14:00"), "a half-read rule would state wrong hours").toBe("Mo-Fr 09:00-19:00, Sa 09:00-14:00");
+    expect(hoursInTurkish("mo-fr 9:00-17:00; ph OFF"), "as people write it").toBe("Pzt–Cum 09:00–17:00 · Resmî tatil kapalı");
+    expect(hoursInTurkish("Mo-Sa 09:00 - 19:00")).toBe("Pzt–Cmt 09:00–19:00");
+    expect(hoursInTurkish("Mo-Sa 08:30-18:00+"), "an open end is not read").toBe("Mo-Sa 08:30-18:00+");
+    expect(hoursInTurkish("sunrise-sunset")).toBe("sunrise-sunset");
+    expect(hoursInTurkish("Mo 09:00-19:00 x")).toBe("Mo 09:00-19:00 x");
+    expect(hoursInTurkish("Mo-Fr 09:00-19:00; Sa by appointment"), "one unread rule keeps them all as written").toBe("Mo-Fr 09:00-19:00; Sa by appointment");
+    expect(hoursInTurkish("x Mo 09:00-19:00")).toBe("x Mo 09:00-19:00");
+  });
+});
+
+describe("using the location", () => {
+  it("is on until it is turned off, and on again when turned back", async () => {
+    expect(await readLocationOn()).toBe(true);
+    await saveLocationOn(false);
+    expect(await readLocationOn()).toBe(false);
+    expect(stored.get("fiala.guide.location"), "kept under its own key across versions").toBe("off");
+    await saveLocationOn(true);
+    expect(await readLocationOn()).toBe(true);
+    expect(stored.has("fiala.guide.location"), "on is the absence of the key").toBe(false);
+    await saveLocationOn(false);
+    const { kv } = await import("../../src/services/kv");
+    vi.spyOn(kv, "get").mockRejectedValueOnce(new Error("locked"));
+    expect(await readLocationOn(), "a store that cannot be read").toBe(true);
+  });
+});
+
 describe("the place chosen by hand", () => {
   it("is kept, read back, and nothing for what cannot be read", async () => {
     expect(await readPlace()).toBeNull();
@@ -170,10 +204,18 @@ describe("the place chosen by hand", () => {
     }
   });
 
+  it("is forgotten from Ayarlar", async () => {
+    await savePlace({ province: "İzmir", district: null });
+    await forgetPlace();
+    expect(await readPlace()).toBeNull();
+  });
+
   it("goes with every list when the device passes to another account", async () => {
     await savePlace({ province: "İzmir", district: null });
+    await saveLocationOn(false);
     await forgetGuide();
     expect(stored.has("fiala.guide.place")).toBe(false);
+    expect(await readLocationOn(), "the location is on again").toBe(true);
     const { forgotten } = (await import("../../src/services/kv")) as unknown as { forgotten: string[] };
     expect(forgotten).toEqual(["fiala.guide.recentMedicines", "fiala.guide.starredMedicines", "fiala.guide.recentPharmacies", "fiala.guide.starredPharmacies"]);
   });

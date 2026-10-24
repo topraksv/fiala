@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Platform, Text, View, useWindowDimensions } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import * as LocalAuthentication from "expo-local-authentication";
 import Bell from "lucide-react-native/icons/bell";
 import BookOpen from "lucide-react-native/icons/book-open";
@@ -8,9 +8,12 @@ import CircleQuestionMark from "lucide-react-native/icons/circle-question-mark";
 import CircleUserRound from "lucide-react-native/icons/circle-user-round";
 import CloudOff from "lucide-react-native/icons/cloud-off";
 import CloudUpload from "lucide-react-native/icons/cloud-upload";
+import DatabaseBackup from "lucide-react-native/icons/database-backup";
 import House from "lucide-react-native/icons/house";
 import KeyRound from "lucide-react-native/icons/key-round";
+import LocateFixed from "lucide-react-native/icons/locate-fixed";
 import LogOut from "lucide-react-native/icons/log-out";
+import MapPin from "lucide-react-native/icons/map-pin";
 import MessageSquare from "lucide-react-native/icons/message-square";
 import ShieldCheck from "lucide-react-native/icons/shield-check";
 import Check from "lucide-react-native/icons/check";
@@ -28,6 +31,7 @@ import { tr } from "../../i18n/tr";
 import { REMINDER_DEFAULTS, REMINDER_HOURS, readReminderPreferences, saveReminderHour, saveReminderMuted, saveReminderNames, type ReminderPreferences } from "../../services/reminder-preferences";
 import { REMINDER_GROUPS, type ReminderGroup } from "../../domain/reminders";
 import { disableReminders, enableReminders, remindersAvailable, replanReminders } from "../../services/reminders";
+import { forgetPlace, readLocationOn, readPlace, saveLocationOn } from "../../services/guide";
 import { kv } from "../../services/kv";
 import { syncNow } from "../../sync/engine";
 import { useSyncStatus } from "../../sync/status";
@@ -107,6 +111,7 @@ export default function SettingsScreen() {
         </View>
       </Card>
       {remindersAvailable ? <Reminders /> : null}
+      <PharmacyPreferences />
       {isSupabaseConfigured ? (
         <>
           <SectionHeader>{tr.settings.syncSection}</SectionHeader>
@@ -114,6 +119,7 @@ export default function SettingsScreen() {
         </>
       ) : null}
       <Card rows>
+        <ListRow icon={DatabaseBackup} title={tr.dataPrivacy.title} subtitle={tr.dataPrivacy.row} chevron onPress={() => router.push("/data-privacy")} />
         <ListRow icon={ShieldCheck} title={tr.legal.title} subtitle={tr.legal.subtitle} chevron onPress={() => router.push("/privacy")} />
       </Card>
       {isSupabaseConfigured ? (
@@ -418,5 +424,57 @@ function PaletteChoice({ label, description, swatch, selected, stacked, onPress 
         ) : null}
       </View>
     </ChoiceTile>
+  );
+}
+
+/** F5.10: the place is the one last chosen on Eczaneler, read again each time the tab comes back. */
+function PharmacyPreferences() {
+  const [locationOn, setLocationOn] = useState(true);
+  const [place, setPlace] = useState<{ province: string; district: string | null } | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      let live = true;
+      void Promise.all([readLocationOn(), readPlace()]).then(([on, saved]) => {
+        if (!live) return;
+        setLocationOn(on);
+        setPlace(saved);
+      });
+      return () => {
+        live = false;
+      };
+    }, []),
+  );
+  return (
+    <>
+      <SectionHeader>{tr.settings.pharmacySection}</SectionHeader>
+      <Card rows>
+        <ToggleRow
+          icon={LocateFixed}
+          title={tr.settings.useLocation}
+          subtitle={tr.settings.useLocationHint}
+          value={locationOn}
+          onValueChange={(on) => {
+            setLocationOn(on);
+            void saveLocationOn(on);
+          }}
+        />
+        <ListRow
+          icon={MapPin}
+          title={tr.settings.defaultPlace}
+          subtitle={place ? `${place.province} · ${place.district ?? tr.pharmacies.noDistrict}` : tr.settings.noDefaultPlace}
+          chevron
+          onPress={() => router.push("/pharmacies")}
+        />
+        {place ? (
+          <ListRow
+            title={tr.settings.forgetPlace}
+            onPress={() => {
+              setPlace(null);
+              void forgetPlace();
+            }}
+          />
+        ) : null}
+      </Card>
+    </>
   );
 }

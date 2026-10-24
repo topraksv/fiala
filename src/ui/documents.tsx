@@ -4,6 +4,7 @@
  * adds one already linked.
  */
 
+import { useState } from "react";
 import { View } from "react-native";
 import { useRouter } from "expo-router";
 import FileImage from "lucide-react-native/icons/file-image";
@@ -11,11 +12,12 @@ import FileText from "lucide-react-native/icons/file-text";
 import Plus from "lucide-react-native/icons/plus";
 
 import type { CabinetDocument } from "../data/documents";
+import type { Leaflet } from "../domain/leaflet";
 import { DOCUMENT_KINDS } from "../db/schema";
 import { useDocuments, usePeople } from "../data/hooks";
 import { formatDay } from "../domain/boxes";
 import { tr } from "../i18n/tr";
-import { Button, Card, ChoiceTile, ListRow, rowsOf, useTileColumns, SectionHeader } from "./components";
+import { Body, Button, Card, ChoiceTile, ListRow, rowsOf, useTileColumns, SectionHeader } from "./components";
 import { radioGroupKeys } from "./keys";
 import { controlSize, spacing } from "./theme";
 
@@ -82,5 +84,31 @@ export function Tiles<T extends string | null>({ label, options, chosen, onChoos
         </View>
       ))}
     </View>
+  );
+}
+
+/** A leaflet's sections (F5.2), each opened on a tap: one is read at a time, as on paper. */
+export function LeafletSections({ leaflet }: { leaflet: Leaflet | null }) {
+  const [shown, setShown] = useState<number | null>(null);
+  if (!leaflet) return <Body muted style={{ marginBottom: spacing.md }}>{tr.documents.leafletNotFound}</Body>;
+  return (
+    <>
+      <SectionHeader>{tr.documents.leafletSection}</SectionHeader>
+      <Card rows>
+        {leaflet.sections.map(({ number, paragraphs }) => (
+          <View key={number}>
+            <ListRow title={`${number}. ${tr.documents.leafletSections[number - 1]}`} chevron={shown !== number} onPress={() => setShown(shown === number ? null : number)} />
+            {shown === number ? (
+              <View style={{ gap: spacing.sm, paddingBottom: spacing.md }}>
+                {paragraphs.map((paragraph, index) => (
+                  <Body key={index}>{paragraph}</Body>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ))}
+      </Card>
+      <Body muted style={{ marginBottom: spacing.md }}>{tr.documents.leafletSource(leaflet.approvedOn ? formatDay(leaflet.approvedOn) : null)}</Body>
+    </>
   );
 }

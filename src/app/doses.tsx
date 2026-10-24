@@ -15,22 +15,19 @@ import ChevronRight from "lucide-react-native/icons/chevron-right";
 import Pill from "lucide-react-native/icons/pill";
 import Plus from "lucide-react-native/icons/plus";
 
-import { answerDose, type CabinetDosePlan, type ReadDoseAnswer } from "../data/doses";
+import type { CabinetDosePlan, ReadDoseAnswer } from "../data/doses";
 import { useDoseAnswers, useDosePlans, useHouseholds, usePeople } from "../data/hooks";
 import type { DoseStatus } from "../db/schema";
-import { undoRows } from "../db/mutations";
 import { formatDay, localDay } from "../domain/boxes";
 import { dosesOfDay, shiftDay, weekdayOf, type DayDose } from "../domain/doses";
 import { tr } from "../i18n/tr";
 import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, Screen, SectionHeader, useTileColumns } from "../ui/components";
-import { appError } from "../ui/dialog";
-import { doseAmount, PlanRows } from "../ui/doses";
+import { answerWithUndo, doseAmount, PlanRows } from "../ui/doses";
 import { Tiles } from "../ui/documents";
 import { radioGroupKeys } from "../ui/keys";
 import { WEEKDAY_TILE_WIDTH } from "../ui/responsive";
 import { useWriter } from "../ui/named-choices";
 import { controlSize, spacing, useTheme } from "../ui/theme";
-import { showUndo } from "../ui/undo";
 
 const ANSWERS: readonly DoseStatus[] = ["taken", "skipped", "snoozed", "missed"];
 
@@ -76,15 +73,6 @@ export default function Doses() {
 
   const theirs = <T extends { personId: string | null }>(rows: readonly T[]) => rows.filter((row) => person == null || row.personId === person);
   const doses = dosesOfDay(theirs(shown), theirs(answered), day, new Date());
-  const answer = async (dose: DayDose, status: DoseStatus | null) => {
-    try {
-      const written = await answerDose(dose.planId, dose, status, { writes });
-      if (written.writes.length > 0) showUndo(status ? tr.doses.answered(tr.doses.states[status]) : tr.doses.cleared, () => undoRows(written));
-    } catch {
-      await appError(tr.errors.saveFailed);
-    }
-  };
-
   return (
     <Screen back="/" title={tr.doses.title} actions={<IconButton icon={Plus} label={tr.doses.add} onPress={add} />}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs, marginBottom: spacing.sm }}>
@@ -132,7 +120,7 @@ export default function Doses() {
           plan={shown.find((each) => each.id === dose.planId)}
           said={dose.answer ? answered.find((each) => each.planId === dose.planId && each.dueOn === dose.dueOn && each.dueTime === dose.dueTime) : undefined}
           answerable={(cabinetId) => writes(cabinetId) && dose.dueOn <= today}
-          onAnswer={(status) => void answer(dose, status)}
+          onAnswer={(status) => void answerWithUndo(dose, status, writes)}
         />
       ))}
 

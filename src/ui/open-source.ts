@@ -31,6 +31,7 @@ export const OPEN_SOURCE: Readonly<Record<string, readonly string[]>> = {
     "expo-status-bar",
     "expo-system-ui",
     "expo-updates",
+    "fflate",
     "react",
     "react-dom",
     "react-native",
@@ -45,7 +46,7 @@ export const OPEN_SOURCE: Readonly<Record<string, readonly string[]>> = {
     "react-native-worklets",
     "zustand",
   ],
-  "Apache-2.0": ["drizzle-orm", "uuidv7"],
+  "Apache-2.0": ["drizzle-orm", "uuidv7", "xlsx"],
   ISC: ["lucide-react-native"],
   "SIL OFL 1.1": ["IBM Plex Serif", "Inter"],
 };

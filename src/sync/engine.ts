@@ -480,6 +480,12 @@ const FROM_START = parsePullCursor(null);
  * the first time fetches its cabinet whole, once per device. A membership
  * ended — left, or removed by the owner — drops the cabinet from the device,
  * with whatever was still to send for it, since the server will take none of it.
+ *
+ * A household brought back changes no row under it, and while it was deleted
+ * the server hid them and refused writes into it (migration 18): a device that
+ * fetched it then holds none of its rows, and one that pushed then had them
+ * set aside. So each delete a live household has come back from sends again
+ * what waited aside for it, then fetches it whole, once per device.
  */
 async function followMemberships(supabase: SupabaseClient, userId: string, token: SessionEpochToken): Promise<void> {
   const sqlite = await getSqliteAsync();
@@ -500,17 +506,30 @@ async function followMemberships(supabase: SupabaseClient, userId: string, token
     // person removed and let back in between two syncs, whose cursors passed
     // what changed while they were out, fetches the cabinet whole again.
     const key = `${FETCHED}${cabinet}@${generation}`;
-    if (left) {
-      await forgetCabinet(sqlite, cabinet);
-    } else if (!fetched.has(key)) {
-      const tables = CABINET_SCOPED.map(([table]) => table);
-      const pages = prefetch(tables, () => FROM_START, supabase, token, cabinet);
-      for (const table of tables) await pullTable(supabase, table, FROM_START, userId, token, pages.get(table)!, cabinet);
-      await withTransaction(async () => {
-        await sqlite.runAsync("DELETE FROM sync_state WHERE table_name LIKE ?", [`${FETCHED}${cabinet}@%`]);
-        await sqlite.runAsync("INSERT INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [key, nowIso()]);
-      });
-    }
+    if (left) await forgetCabinet(sqlite, cabinet);
+    else if (!fetched.has(key)) await fetchWhole(cabinet, key, "@");
+  }
+  const restored = await sqlite.getAllAsync<{ id: string; tombstone_version: number }>(
+    "SELECT id, tombstone_version FROM cabinets WHERE deleted_at IS NULL AND tombstone_version > 0",
+  );
+  for (const { id: cabinet, tombstone_version: generation } of restored) {
+    assertActive(token);
+    const key = `${FETCHED}${cabinet}~${generation}`;
+    if (fetched.has(key)) continue;
+    const aside = await sqlite.getAllAsync<{ id: number }>("SELECT id FROM sync_dead_letters WHERE json_extract(payload, '$.cabinet_id') = ?", [cabinet]);
+    for (const { id } of aside) await retryDeadLetter(id);
+    await fetchWhole(cabinet, key, "~");
+  }
+
+  // A membership's key and a restore's are kept apart, so neither answers for the other.
+  async function fetchWhole(cabinet: string, key: string, kind: "@" | "~"): Promise<void> {
+    const tables = CABINET_SCOPED.map(([table]) => table);
+    const pages = prefetch(tables, () => FROM_START, supabase, token, cabinet);
+    for (const table of tables) await pullTable(supabase, table, FROM_START, userId, token, pages.get(table)!, cabinet);
+    await withTransaction(async () => {
+      await sqlite.runAsync("DELETE FROM sync_state WHERE table_name LIKE ?", [`${FETCHED}${cabinet}${kind}%`]);
+      await sqlite.runAsync("INSERT INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [key, nowIso()]);
+    });
   }
 }
 
@@ -549,7 +568,7 @@ function forgetCabinet(sqlite: LocalDatabase, cabinet: string): Promise<void> {
         await sqlite.runAsync(`DELETE FROM ${queue} WHERE table_name = ? AND json_extract(payload, '$.${column}') = ?`, [table, cabinet]);
       }
     }
-    await sqlite.runAsync("DELETE FROM sync_state WHERE table_name LIKE ?", [`${FETCHED}${cabinet}@%`]);
+    await sqlite.runAsync("DELETE FROM sync_state WHERE table_name LIKE ?", [`${FETCHED}${cabinet}%`]);
   });
 }
 
@@ -606,9 +625,12 @@ async function retryAsideAfterUpdate(): Promise<void> {
   await sqlite.runAsync("INSERT INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [key, nowIso()]);
 }
 
+/** What asks for the person: a write a deleted household refused waits for its undo, or goes with it a week on, and asks nothing. */
 async function deadLetterCount(): Promise<number> {
   const sqlite = await getSqliteAsync();
-  return (await sqlite.getFirstAsync<{ n: number }>("SELECT COUNT(*) AS n FROM sync_dead_letters"))!.n;
+  return (await sqlite.getFirstAsync<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM sync_dead_letters WHERE NOT EXISTS (SELECT 1 FROM cabinets WHERE id = json_extract(payload, '$.cabinet_id') AND deleted_at IS NOT NULL)",
+  ))!.n;
 }
 
 function clearScheduledSync(): void {
