@@ -16,19 +16,19 @@
       "timeout": 0,
       "survived": 2,
       "noCoverage": 0,
-      "cost": 438,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "cost": 336,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/auth/session.ts": {
-      "score": 89.08,
-      "killed": 408,
+      "score": 89.91,
+      "killed": 419,
       "timeout": 0,
-      "survived": 44,
-      "noCoverage": 6,
-      "cost": 13028,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "survived": 43,
+      "noCoverage": 4,
+      "cost": 14329,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/auth/verification-brake.ts": {
       "score": 95.65,
@@ -36,19 +36,19 @@
       "timeout": 0,
       "survived": 1,
       "noCoverage": 0,
-      "cost": 1419,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "cost": 1747,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/data/cabinet.ts": {
       "score": 100,
-      "killed": 293,
+      "killed": 505,
       "timeout": 0,
       "survived": 0,
       "noCoverage": 0,
-      "cost": 8887,
-      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
-      "measuredDate": "2026-10-23"
+      "cost": 19689,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/data/documents.ts": {
       "score": 100,
@@ -56,19 +56,19 @@
       "timeout": 0,
       "survived": 0,
       "noCoverage": 0,
-      "cost": 6407,
-      "measuredOn": "dc66ab2fc999141e85fd3ff835d9ebe34d5443fa",
-      "measuredDate": "2026-10-23"
+      "cost": 6447,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/data/doses.ts": {
-      "score": 95.36,
-      "killed": 144,
+      "score": 96.7,
+      "killed": 205,
       "timeout": 0,
       "survived": 7,
       "noCoverage": 0,
-      "cost": 9978,
-      "measuredOn": "dc66ab2fc999141e85fd3ff835d9ebe34d5443fa",
-      "measuredDate": "2026-10-23"
+      "cost": 15270,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/data/live-query.ts": {
       "score": 94.17,
@@ -86,9 +86,9 @@
       "timeout": 0,
       "survived": 0,
       "noCoverage": 0,
-      "cost": 1410,
-      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
-      "measuredDate": "2026-10-23"
+      "cost": 1257,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/data/reset.ts": {
       "score": 100,
@@ -101,14 +101,14 @@
       "measuredDate": "2026-10-22"
     },
     "src/data/settings.ts": {
-      "score": 97.14,
-      "killed": 34,
+      "score": 97.96,
+      "killed": 96,
       "timeout": 0,
-      "survived": 1,
+      "survived": 2,
       "noCoverage": 0,
-      "cost": 872,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "cost": 2681,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/db/client.ts": {
       "score": 92.79,
@@ -126,9 +126,9 @@
       "timeout": 0,
       "survived": 2,
       "noCoverage": 0,
-      "cost": 1210,
-      "measuredOn": "dc66ab2fc999141e85fd3ff835d9ebe34d5443fa",
-      "measuredDate": "2026-10-23"
+      "cost": 1245,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/db/migrate.ts": {
       "score": 72.22,
@@ -136,29 +136,29 @@
       "timeout": 0,
       "survived": 13,
       "noCoverage": 2,
-      "cost": 2135,
-      "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
-      "measuredDate": "2026-10-22"
+      "cost": 3214,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/db/mutations.ts": {
-      "score": 93.13,
-      "killed": 146,
+      "score": 93.9,
+      "killed": 151,
       "timeout": 3,
       "survived": 10,
-      "noCoverage": 1,
-      "cost": 4484,
-      "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
-      "measuredDate": "2026-10-22"
+      "noCoverage": 0,
+      "cost": 8580,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/domain/boxes.ts": {
       "score": 100,
-      "killed": 502,
-      "timeout": 9,
+      "killed": 595,
+      "timeout": 10,
       "survived": 0,
       "noCoverage": 0,
-      "cost": 12361,
-      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
-      "measuredDate": "2026-10-23"
+      "cost": 13345,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/domain/dates.ts": {
       "score": 100,
@@ -201,14 +201,14 @@
       "measuredDate": "2026-10-23"
     },
     "src/domain/logins.ts": {
-      "score": 94.95,
-      "killed": 94,
+      "score": 95.5,
+      "killed": 106,
       "timeout": 0,
       "survived": 5,
       "noCoverage": 0,
-      "cost": 2930,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "cost": 6436,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/domain/names.ts": {
       "score": 100,
@@ -280,15 +280,25 @@
       "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
       "measuredDate": "2026-10-22"
     },
-    "src/services/kv.ts": {
-      "score": 93.33,
-      "killed": 42,
+    "src/services/guide.ts": {
+      "score": 98,
+      "killed": 147,
       "timeout": 0,
+      "survived": 2,
+      "noCoverage": 1,
+      "cost": 3241,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
+    },
+    "src/services/kv.ts": {
+      "score": 97.17,
+      "killed": 101,
+      "timeout": 2,
       "survived": 3,
       "noCoverage": 0,
-      "cost": 174,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "cost": 816,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/services/picked-file.ts": {
       "score": 93.29,
@@ -346,29 +356,29 @@
       "timeout": 0,
       "survived": 0,
       "noCoverage": 0,
-      "cost": 414,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "cost": 443,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/sync/documents.ts": {
-      "score": 96.59,
-      "killed": 82,
+      "score": 97.73,
+      "killed": 83,
       "timeout": 3,
-      "survived": 3,
+      "survived": 2,
       "noCoverage": 0,
-      "cost": 6645,
-      "measuredOn": "dc66ab2fc999141e85fd3ff835d9ebe34d5443fa",
-      "measuredDate": "2026-10-23"
+      "cost": 6556,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/sync/engine.ts": {
-      "score": 76.08,
-      "killed": 326,
-      "timeout": 8,
-      "survived": 101,
-      "noCoverage": 4,
-      "cost": 9206,
-      "measuredOn": "504c5c18d2245a86fe1e694c8f004e327aef96b1",
-      "measuredDate": "2026-10-22"
+      "score": 79.29,
+      "killed": 458,
+      "timeout": 9,
+      "survived": 117,
+      "noCoverage": 5,
+      "cost": 22460,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/sync/live.ts": {
       "score": 93.22,
@@ -391,14 +401,14 @@
       "measuredDate": "2026-10-22"
     },
     "src/sync/photos.ts": {
-      "score": 90.91,
-      "killed": 146,
+      "score": 90.96,
+      "killed": 147,
       "timeout": 4,
       "survived": 14,
       "noCoverage": 1,
-      "cost": 6959,
-      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
-      "measuredDate": "2026-10-23"
+      "cost": 7240,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/sync/rows.ts": {
       "score": 86,
@@ -436,9 +446,9 @@
       "timeout": 0,
       "survived": 0,
       "noCoverage": 0,
-      "cost": 7049,
-      "measuredOn": "73333fd7d328b5144869860fe4259222cee01217",
-      "measuredDate": "2026-10-23"
+      "cost": 7563,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/sync/status.ts": {
       "score": 90,
@@ -446,9 +456,9 @@
       "timeout": 0,
       "survived": 3,
       "noCoverage": 0,
-      "cost": 1122,
-      "measuredOn": "99d349482eb6a8f7ddc7dab87f14ed40f599eb03",
-      "measuredDate": "2026-10-22"
+      "cost": 1909,
+      "measuredOn": "cf36215159151723a135f9c967bcae1fd8f855b6",
+      "measuredDate": "2026-10-24"
     },
     "src/sync/supabase.ts": {
       "score": 100,
