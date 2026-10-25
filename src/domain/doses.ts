@@ -56,9 +56,14 @@ export function shiftDay(day: string, days: number): string {
   return localDay(date);
 }
 
+/** Whether a plan is being taken on a local day, whatever its weekdays: begun, not ended, not paused. */
+export function runsOn(plan: Pick<PlanFacts, "startsOn" | "endsOn" | "paused">, day: string): boolean {
+  return !plan.paused && day >= plan.startsOn && (plan.endsOn == null || day <= plan.endsOn);
+}
+
 /** Whether a plan asks for its doses on a local day; a paused one asks for none. */
 export function plannedOn(plan: PlanFacts, day: string): boolean {
-  return !plan.paused && day >= plan.startsOn && (plan.endsOn == null || day <= plan.endsOn) && (plan.weekdays & weekdayOf(day)) !== 0;
+  return runsOn(plan, day) && (plan.weekdays & weekdayOf(day)) !== 0;
 }
 
 export interface Dose {

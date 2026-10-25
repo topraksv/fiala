@@ -37,6 +37,7 @@ import { appConfirm, appError, appPrompt } from "../../ui/dialog";
 import { documentTitle, KINDS, LeafletSections, Tiles } from "../../ui/documents";
 import { CabinetChoice, NamedChoices, ViewOnly } from "../../ui/named-choices";
 import { navigateBack } from "../../ui/navigation";
+import { RefusedFile } from "../../ui/photo-field";
 import { PhotoViewer } from "../../ui/photo-viewer";
 import { Press } from "../../ui/press";
 import { photoPreview, radius, spacing, useTheme } from "../../ui/theme";
@@ -238,6 +239,7 @@ function FileCard({ document, title }: { document: CabinetDocument; title: strin
 
   return (
     <View style={{ gap: spacing.sm, marginBottom: spacing.md }}>
+      <RefusedFile id={fileId} />
       {shown ? (
         <Press accessibilityRole="button" accessibilityLabel={tr.common.withDetail(tr.documents.open, title)} onPress={() => setEnlarged(true)}>
           <Image

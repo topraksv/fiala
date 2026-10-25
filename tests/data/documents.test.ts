@@ -69,9 +69,9 @@ describe("a document", () => {
     await editDocument(id, { title: "Silinmiş" });
     expect((await archiveDocuments([id], true)).writes, "nothing reaches a deleted one").toEqual([]);
     expect(await moveDocument(id, await openHousehold("me", "Ev"))).toBeNull();
-    expect(all(`SELECT title, archived FROM documents WHERE id = '${id}'`)).toEqual([{ title: "Kardiyoloji kontrol", archived: 0 }]);
+    expect(all(`SELECT title, archived FROM documents WHERE id = '${id}'`), "the tombstone keeps no words").toEqual([{ title: "", archived: 0 }]);
     await undoRows(deleted);
-    expect(await readDocuments()).toHaveLength(1);
+    expect((await readDocuments()).map((document) => document.title), "the undo brings them back").toEqual(["Kardiyoloji kontrol"]);
   });
 
   it("is linked as it is added from a box's or a product's page, the link the same one linking makes", async () => {

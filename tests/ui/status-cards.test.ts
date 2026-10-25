@@ -13,12 +13,13 @@ vi.mock("../../src/services/kv", () => {
   return { kv: { get: async (key: string) => stored.get(key) ?? null, set: async (key: string, value: string) => void stored.set(key, value) } };
 });
 
-const { STATUS_CARDS, layoutFrom, moveCard, readCardLayout, saveCardLayout } = await import("../../src/ui/status-cards");
+const { DEFAULT_HIDDEN, STATUS_CARDS, layoutFrom, moveCard, readCardLayout, saveCardLayout } = await import("../../src/ui/status-cards");
 const { openCabinet, takeCabinetFilter } = await import("../../src/ui/cabinet-link");
 
 describe("the card layout", () => {
-  it("is every card, shown, in the default order, until one is stored or when what is stored cannot be read", async () => {
-    const all = { order: [...STATUS_CARDS], hidden: [] };
+  it("is every card in the default order, the four that ask for something shown, until one is stored or when what is stored cannot be read", async () => {
+    const all = { order: [...STATUS_CARDS], hidden: [...DEFAULT_HIDDEN] };
+    expect(STATUS_CARDS.filter((card) => !DEFAULT_HIDDEN.includes(card))).toEqual(["doses", "lists", "expired", "soon"]);
     for (const stored of [null, "", "not json", "null", "5", JSON.stringify({ order: "lists", hidden: {} })]) expect(layoutFrom(stored), String(stored)).toEqual(all);
     expect(await readCardLayout()).toEqual(all);
   });

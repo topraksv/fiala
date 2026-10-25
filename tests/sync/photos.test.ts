@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../../src/db/client", () => ({ getSqliteAsync: async () => null }));
 vi.mock("../../src/sync/supabase", () => ({ getSupabase: () => null }));
 
-const { refusedForGood } = await import("../../src/sync/photos");
+const { refuse, refusedFiles, refusedForGood } = await import("../../src/sync/photos");
 
 describe("refusedForGood", () => {
   it("tells a photo refused for good from a token Storage would take once renewed", () => {
@@ -20,5 +20,19 @@ describe("refusedForGood", () => {
     for (const message of ["Unauthorized", "unauthorised", "Token invalid", "signature mismatch", "JWT expired"]) {
       expect(refusedForGood({ status: 403, message }), message).toBe(false);
     }
+  });
+});
+
+describe("a file refused for good", () => {
+  it("is known by its id and told to whoever listens, until they stop", () => {
+    const heard = vi.fn();
+    const stop = refusedFiles.subscribe(heard);
+    expect(refusedFiles.has("f1")).toBe(false);
+    refuse("f1");
+    expect([refusedFiles.has("f1"), refusedFiles.has("f2")]).toEqual([true, false]);
+    expect(heard).toHaveBeenCalledTimes(1);
+    stop();
+    refuse("f2");
+    expect(heard).toHaveBeenCalledTimes(1);
   });
 });

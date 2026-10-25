@@ -13,7 +13,7 @@ import { nowIso } from "../db/mutations";
 import type { DocumentFileType } from "../db/schema";
 import { fileTypeOf } from "../data/documents";
 import { isUuidShaped } from "./merge-policy";
-import { base64OfBlob, bytesOf, checkActive, refusedForGood } from "./photos";
+import { base64OfBlob, bytesOf, checkActive, refuse, refusedFiles, refusedForGood } from "./photos";
 import { getSupabase } from "./supabase";
 
 const BUCKET = "documents";
@@ -23,9 +23,6 @@ export const documentPath = (fileId: string, type: DocumentFileType) => `${fileI
 
 /** The files a live row names. */
 const NAMED = "SELECT file_id FROM documents WHERE deleted_at IS NULL AND file_id IS NOT NULL";
-
-/** Files Storage refused for good, not offered again until the next launch. */
-const refused = new Set<string>();
 
 /**
  * Send every file a live row names that Storage does not have yet. One
@@ -39,11 +36,11 @@ export async function sendPendingDocuments(supabase: SupabaseClient, signal: Abo
       WHERE f.uploaded_at IS NULL GROUP BY f.id`,
   );
   for (const file of pending) {
-    if (refused.has(file.id)) continue;
+    if (refusedFiles.has(file.id)) continue;
     checkActive(signal);
     // `upsert`, so a send cut short is finished by the next.
     const { error } = await supabase.storage.from(BUCKET).upload(documentPath(file.id, file.type), bytesOf(file.data), { contentType: FILE[file.type][1], upsert: true });
-    if (error && refusedForGood(error)) refused.add(file.id);
+    if (error && refusedForGood(error)) refuse(file.id);
     else if (error) return;
     else await sqlite.runAsync("UPDATE document_files SET uploaded_at = ? WHERE id = ?", [nowIso(), file.id]);
   }

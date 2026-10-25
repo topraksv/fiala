@@ -57,9 +57,10 @@ const TEXT = 4.5;
 const NON_TEXT = 3;
 
 describe("the palette set", () => {
-  it("ships three families, Amber first as the default", () => {
-    expect(Object.keys(PALETTES)).toEqual(["clay", "ocean", "forest"]);
-    expect(DEFAULT_PALETTE_ID).toBe("clay");
+  it("ships Fiala's own Adaçayı first as the default, then the family's three", () => {
+    expect(Object.keys(PALETTES)).toEqual(["sage", "clay", "ocean", "forest"]);
+    expect(DEFAULT_PALETTE_ID).toBe("sage");
+    expect(PALETTES.sage.light.primary).toBe("#3F6B62"); // the brand kit's accent
   });
 
   it("resolves an unknown or missing preference to the default", () => {
@@ -67,8 +68,8 @@ describe("the palette set", () => {
     for (const id of Object.keys(PALETTES)) expect(resolvePaletteId(id)).toBe(id);
   });
 
-  // Amber is what everyone sees without choosing; it matches Helix's ramp exactly.
-  it("keeps the default ramp exactly Helix's", () => {
+  // Amber is the family's default, so a person who chose it in Helix finds the same ramp here.
+  it("keeps Amber's ramp exactly Helix's", () => {
     expect(PALETTES.clay.light).toMatchObject({
       background: "#F1EDE8", surface: "#FFFDFB", surfaceAlt: "#E7DFD7", surfaceStrong: "#C2B2A3",
       textStrong: "#2A211B", text: "#3A3028", textSecondary: "#62564C", textMuted: "#6D6157",
@@ -210,7 +211,9 @@ describe("the floating tab bar", () => {
 });
 
 describe("theme.ts holds the only literals", () => {
-  const sources = sourceFiles("src", { atLeast: 60 }).filter((path) => path !== join("src", "ui", "theme.ts"));
+  // `brand-art.ts` is generated from the brand kit: its widths are pen weights
+  // in the drawing's own viewBox units, not sizes on a screen.
+  const sources = sourceFiles("src", { atLeast: 60 }).filter((path) => path !== join("src", "ui", "theme.ts") && path !== join("src", "ui", "brand-art.ts"));
 
   // A pair of hex digits appended to a palette colour is an alpha channel; a
   // quoted pair alone is not, or every "01" and "20" in a parser would be one.

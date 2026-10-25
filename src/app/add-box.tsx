@@ -4,7 +4,8 @@
  * what the box does not, and else from TİTCK's list (F1.9); a name searched
  * in the list fills the same fields (F1.10). Every field stays the person's
  * to correct before saving. The first save asks the health-data consent, apart from the
- * notice accepted at sign-up.
+ * notice accepted at sign-up. A box for someone who already has another
+ * medicine of its substance at home asks before it is saved (F7.8).
  */
 
 import { useEffect, useState } from "react";
@@ -18,7 +19,7 @@ import { addNamed, addPackage, findProduct, hasBox, type PackageFields } from ".
 import { useCabinet, useLocations, usePeople, useSettings } from "../data/hooks";
 import { giveHealthConsent, hasHealthConsent, profileChoice } from "../data/settings";
 import { PACKAGE_UNITS } from "../db/schema";
-import { catalogueFields, normalGtin, parseAmount, parseDay, printedGtin, readBoxCode } from "../domain/boxes";
+import { catalogueFields, normalGtin, parseAmount, parseDay, printedGtin, readBoxCode, sameSubstanceHeld } from "../domain/boxes";
 import { tr } from "../i18n/tr";
 import { canScan, launchScanner, onScanned } from "../services/barcode-scan";
 import { catalogueByGtin, catalogueEntry, type CatalogueEntry } from "../services/guide";
@@ -220,6 +221,18 @@ export default function AddBoxScreen() {
           gtin: normalGtin(fields.barcode),
         };
 
+  // The box already added, and the same substance already held by its person: each asked once.
+  const confirmedAlike = async (serial: string | null) => {
+    const gtin = held ? held.gtin : normalGtin(fields.barcode);
+    if (gtin && serial && (await hasBox(gtin, serial)) && !(await appConfirm(tr.addBox.duplicateTitle, tr.addBox.duplicateBody, tr.addBox.duplicateConfirm))) return false;
+    const substance = held ? held.activeSubstance : orNull(fields.activeSubstance);
+    // Another box of the same medicine is not a second one: the held product, or the one its barcode lands in.
+    const others = cabinet.filter((each) => each.id !== held?.id && !(gtin && each.gtin === gtin));
+    const alike = sameSubstanceHeld(others, substance, personId);
+    const owner = people.find((each) => each.id === personId);
+    return !alike || !owner || appConfirm(tr.addBox.sameSubstanceTitle, tr.addBox.sameSubstanceBody(owner.name, alike.name, substance!), tr.addBox.duplicateConfirm);
+  };
+
   const save = async (next: boolean) => {
     setAttempted(true);
     setFailure(null);
@@ -228,9 +241,8 @@ export default function AddBoxScreen() {
       if (!(await appConfirm(tr.addBox.consentTitle, tr.addBox.consentBody, tr.addBox.consentConfirm))) return setFailure(tr.addBox.consentRequired);
       await giveHealthConsent();
     }
-    const gtin = held ? held.gtin : normalGtin(fields.barcode);
     const serial = orNull(fields.serial);
-    if (gtin && serial && (await hasBox(gtin, serial)) && !(await appConfirm(tr.addBox.duplicateTitle, tr.addBox.duplicateBody, tr.addBox.duplicateConfirm))) return;
+    if (!(await confirmedAlike(serial))) return;
     setBusy(true);
     try {
       const name = held?.name ?? fields.name.trim();

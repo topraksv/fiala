@@ -94,6 +94,38 @@ export function onLocalWrite(listener: () => void): void {
 }
 
 /**
+ * What a tombstone keeps of its row's content: nothing a person typed or
+ * chose (KVKK m. 7, `docs/TASKS.md` F7.11). Ids, the parent each names, its
+ * stamps and what a check needs stay, for sync and for the reads that follow
+ * a deleted plan to its product and person. Migration 20's
+ * `tombstone_scrub` blanks the same columns on the server, so the answer to
+ * a push is the row written and an undo still matches it; the undo brings the
+ * content back from its snapshot. Moves, settings, households and links are
+ * left whole: they hold no words, or a revive reads them back. A photo's or a
+ * file's id stays too: the server lets a row name a file only while another
+ * row it can read names it, so an undo of a household member's delete would
+ * otherwise lose a file someone else sent. Only live rows authorise a file
+ * and keep it from the sweep, so the id grants nothing.
+ */
+const TOMBSTONE_BLANKS: Partial<Record<SyncedTableName, Record<string, unknown>>> = {
+  people: { name: "", color: null, warnDays: null, allergies: null, conditions: null },
+  products: { name: "", brand: null, activeSubstance: null, strength: null, form: null, pack: null, manufacturer: null, gtin: null, note: null, starred: false, wanted: false },
+  tags: { name: "" },
+  packages: {
+    personId: null, locationId: null, expiresOn: null, openedOn: null, useWithinDays: null, lowMilli: null, serial: null, lot: null, nickname: null,
+    acquiredOn: null, acquiredFrom: null, note: null, disposition: null, warnDays: null, checkOf: null, checkAskedAt: null,
+  },
+  package_changes: { changes: "{}" },
+  documents: { title: "", personId: null, issuedOn: null, note: null, reference: null },
+  dose_plans: { instructions: null },
+};
+
+/** A row as its tombstone keeps it; a live row as it is. */
+export function scrubTombstone(table: SyncedTableName, row: Record<string, unknown>): Record<string, unknown> {
+  return row.deletedAt == null ? row : { ...row, ...TOMBSTONE_BLANKS[table] };
+}
+
+/**
  * Upsert each row and queue its outbox event, all in one transaction. A write
  * that depends on what is stored passes a function: it reads inside the same
  * transaction, so no other local write can land between its read and the
@@ -114,7 +146,7 @@ export async function writeRows(writes: readonly RowWrite[] | (() => Promise<rea
         ? Number(row.tombstoneVersion)
         : 0;
       const dbRow = toDbShape(table, {
-        ...row,
+        ...scrubTombstone(table, { ...row, deletedAt }),
         createdAt: row.createdAt ?? timestamp,
         updatedAt: timestamp,
         deletedAt,
@@ -203,7 +235,8 @@ function revertRows({ writes, before }: RowsWritten, check: () => Promise<unknow
     for (const [at, { table, row }] of writes.entries()) {
       const stored = await findRow(table, String(row.id));
       const current = stored && fromDbShape(table, stored);
-      if (!current || !Object.entries(row).every(([key, value]) => STAMPED.has(key) || current[key] === value)) {
+      // A tombstone is stored scrubbed: what was written is what scrubbing left.
+      if (!current || !Object.entries(scrubTombstone(table, { ...row, deletedAt: "deletedAt" in row ? row.deletedAt : current.deletedAt })).every(([key, value]) => STAMPED.has(key) || current[key] === value)) {
         throw new Error(`Cannot undo: the ${table} row has changed since`);
       }
       const was = before[at];

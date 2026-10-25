@@ -1,6 +1,9 @@
 <div align="center">
 
-# Fiala
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/horizontal-dark.png">
+  <img src="assets/brand/horizontal-light.png" alt="Fiala" width="420">
+</picture>
 
 ### Evin ilaç dolabı — kimin, nerede, ne zamana kadar.
 
@@ -12,12 +15,13 @@ are, their expiry and stock, dose plans, prescriptions, and a guide over
 TİTCK's list with OpenStreetMap's pharmacies. iOS, Android and the web from one
 codebase.*
 
-<a href="https://topraksv.github.io/fiala/"><img alt="Fiala'yı aç" src="https://img.shields.io/badge/Fiala'yı_aç-A55335?style=for-the-badge&logo=expo&logoColor=white"></a>
+<a href="https://topraksv.github.io/fiala/"><img alt="Fiala'yı aç" src="https://img.shields.io/badge/Fiala'yı_aç-3F6B62?style=for-the-badge&logo=expo&logoColor=white"></a>
 
 [![ci](https://github.com/topraksv/fiala/actions/workflows/ci.yml/badge.svg)](https://github.com/topraksv/fiala/actions/workflows/ci.yml)
+[![sürüm](https://img.shields.io/github/v/release/topraksv/fiala?label=s%C3%BCr%C3%BCm&color=3F6B62)](https://github.com/topraksv/fiala/releases)
 [![Expo SDK 58](https://img.shields.io/badge/Expo-SDK%2058-0F0F0D?logo=expo&logoColor=white)](https://docs.expo.dev/versions/v58.0.0/)
 [![Node 22](https://img.shields.io/badge/Node-22-0F0F0D?logo=nodedotjs&logoColor=5FA04E)](#geliştirici-kurulumu)
-[![Proprietary](https://img.shields.io/badge/license-proprietary-A55335)](LICENSE)
+[![Proprietary](https://img.shields.io/badge/license-proprietary-3F6B62)](LICENSE)
 
 <br>
 
@@ -53,6 +57,23 @@ cihazların ve evdekilerin arasını eşitlemek içindir, çalışmanın şartı
 
 ---
 
+## İş başında
+
+<table>
+<tr>
+<td align="center" width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/m-emergency-dark.png"><img src="assets/screenshots/m-emergency-light.png" alt="Acil durum kartı: bir kişinin alerjileri, kronik durumları ve düzenli kullandığı ilaçlar" width="215"></picture></td>
+<td align="center" width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/m-doses-dark.png"><img src="assets/screenshots/m-doses-light.png" alt="Doz Takvimi: haftanın günleri, kişiler ve bugünün dozları Aldım ve Atladım düğmeleriyle" width="215"></picture></td>
+<td align="center" width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/m-product-dark.png"><img src="assets/screenshots/m-product-light.png" alt="Bir ilaç: kalan miktar ve kutuları, doz planları ve belgeleri" width="215"></picture></td>
+</tr>
+<tr>
+<td align="center"><b>Acil durumda</b><br><sub>Alerjiler, kronik durumlar ve düzenli kullanılan ilaçlar büyük yazıyla; tek dokunuşla paylaşılır.</sub></td>
+<td align="center"><b>Doz zamanı</b><br><sub>Kişi başına plan; her doz Aldım ya da Atladım, gerisi "…" altında. Telefon zamanında hatırlatır.</sub></td>
+<td align="center"><b>Bir ilacın hepsi</b><br><sub>Kaç kutu, ne kadar kaldı, ne zamana kadar; dozları ve reçeteleri aynı sayfada.</sub></td>
+</tr>
+</table>
+
+---
+
 ## Nereye bakacaksın?
 
 | İhtiyacın | Gideceğin yer | Bulacakların |
@@ -64,7 +85,10 @@ cihazların ve evdekilerin arasını eşitlemek içindir, çalışmanın şartı
 | **Yakında eczane** | **Rehber → Eczaneler** | Yakınımdakiler ya da il ve ilçe; telefonda harita, arama, yol tarifi; nöbetçi eczane e-Devlet'te |
 | **Doz takibi** | **Durum → Doz Takvimi** | Kişi başına plan, takvim ve hatırlatma |
 | **Reçeteler** | **Dolabım → Belgeler** | Fotoğraf ya da PDF; ilaçlara ve kutulara bağlanır |
+| **Acil durumda** | **Dolabım → Kişileri Düzenle → kişi** | Alerjiler, kronik hastalıklar ve şu an alınan ilaçlar; acil durum kartı büyük yazıyla gösterir ve paylaşır |
+| **Süresi geçenler** | **Durum → Atılacaklar** | Atılacak kutular ve nasıl atılacakları, Sıfır Atık kılavuzuyla |
 | **Evdekilerle paylaşmak** | **Ayarlar → Hane** | Davet bağlantısı ya da kodu: yönetici, düzenleyen ya da yalnız gören |
+| **Yedek** | **Ayarlar → Veri ve Gizlilik** | Excel'e aktarma, yedekleme ve geri yükleme, belgeleri kimin açabildiği |
 | **Hesap** | **Ayarlar → Hesap güvenliği** | E-posta, şifre, veri sıfırlama, dondurma ve silme |
 
 ---
@@ -77,7 +101,7 @@ geldiğinde outbox Supabase'e gönderilir, hanenin değişiklikleri canlı kanal
 gelir.
 
 - **Silme geri alınabilir.** Silmeler tombstone'dur, cihazlar arasında tutarlı
-  kalır.
+  kalır; tombstone içerik taşımaz, yazılan her şey sunucuda da boşaltılır.
 - **Bozuk satır kuyruğu tıkamaz.** Reddedilen kayıt karantinaya alınır ve ne
   olduğu Ayarlar'da yazılır; ötekiler gitmeye devam eder.
 - **Konum telefondan çıkmaz.** Yakındaki eczaneler için sunucuya bir
@@ -102,8 +126,8 @@ getirdiği [CHANGELOG.md](CHANGELOG.md) içinde.
 
 Fiala, Helix'in ve Gital'ın tasarım dilini taşır: aynı tokenlar, aynı bileşenler.
 
-- **Palet:** ailenin üç paleti, Ayarlar'dan anında değişir; Fiala'nın kendi
-  markası ve paleti yolda.
+- **Palet:** Fiala'nın kendi Adaçayı'sı ve ailenin üç paleti, Ayarlar'dan
+  anında değişir; işaret seçilen paletin rengini alır.
 - **Hareket öğededir;** hareket azaltma tercihi hepsini durdurur.
 - **Erişilebilirlik ölçülür.** Metin kontrastı iki temada da hesaplanır; her
   dokunma hedefi en az 44 nokta; büyük yazıda kutular sütun bırakır, harf

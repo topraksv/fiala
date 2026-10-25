@@ -15,13 +15,21 @@ export interface CardLayout {
   hidden: StatusCard[];
 }
 
+/**
+ * Shown until the person chooses otherwise: what has run out of time, what is
+ * about to, today's doses and the lists (the owner, F7.14). The rest wait in
+ * the card editor, so a first Durum asks for nothing it can do without.
+ */
+export const DEFAULT_HIDDEN: readonly StatusCard[] = ["opened", "stock", "undated", "boxes", "people", "recent"];
+
 const CARDS_KEY = "fiala.status.cards";
 
 const isCard = (value: unknown): value is StatusCard => (STATUS_CARDS as readonly unknown[]).includes(value);
 
 /**
  * What was stored, read defensively: an unknown or repeated card is dropped,
- * and a card this build added since joins at the end, shown.
+ * a card this build added since joins at the end, shown, and a layout with no
+ * hidden set takes the default one.
  */
 export function layoutFrom(stored: string | null): CardLayout {
   let parsed: { order?: unknown; hidden?: unknown } = {};
@@ -32,7 +40,7 @@ export function layoutFrom(stored: string | null): CardLayout {
   }
   const listed = (value: unknown) => [...new Set(Array.isArray(value) ? value.filter(isCard) : [])];
   const order = listed(parsed.order);
-  return { order: [...order, ...STATUS_CARDS.filter((card) => !order.includes(card))], hidden: listed(parsed.hidden) };
+  return { order: [...order, ...STATUS_CARDS.filter((card) => !order.includes(card))], hidden: Array.isArray(parsed.hidden) ? listed(parsed.hidden) : [...DEFAULT_HIDDEN] };
 }
 
 export async function readCardLayout(): Promise<CardLayout> {

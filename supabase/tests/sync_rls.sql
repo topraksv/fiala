@@ -8,7 +8,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(60);
+select extensions.plan(63);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -240,6 +240,26 @@ select is(
     ('10000000-0000-4000-8000-000000000001', 'cd000000-0000-7000-8000-00000000000c', 'c2000000-0000-8000-8000-00000000000c', 'tablet', 0)$$),
   '23514',
   'a warning no days ahead is refused'
+);
+select is(
+  pg_temp.exec_sqlstate($$insert into public.people (cabinet_id, id, name, allergies) values
+    ('10000000-0000-4000-8000-000000000001', 'd5000000-0000-7000-8000-00000000000c', 'Ali', repeat('x', 501))$$),
+  '23514',
+  'an allergy past 500 characters is refused'
+);
+insert into public.people (cabinet_id, id, name, allergies) values
+  ('10000000-0000-4000-8000-000000000001', 'd6000000-0000-7000-8000-00000000000c', 'Ayşe', 'penisilin'),
+  ('10000000-0000-4000-8000-000000000001', 'd7000000-0000-7000-8000-00000000000c', 'Veli', 'polen');
+update public.people set deleted_at = now() where id = 'd6000000-0000-7000-8000-00000000000c';
+select is(
+  (select name || coalesce(allergies, '-') from public.people where id = 'd6000000-0000-7000-8000-00000000000c'),
+  '-',
+  'a deleted person keeps neither name nor allergy on the server'
+);
+select is(
+  (select name || allergies from public.people where id = 'd7000000-0000-7000-8000-00000000000c'),
+  'Velipolen',
+  'a living person keeps both'
 );
 select is(
   pg_temp.exec_sqlstate($$insert into public.packages (cabinet_id, id, product_id, unit, check_of) values

@@ -118,9 +118,6 @@ export const tr = {
     boxes: (count: number) => `${count}\u00a0kutu`,
     added: (day: string) => `${day} eklendi`,
     edited: (day: string) => `${day} düzenlendi`,
-    homeCheck: "Evde var mı?",
-    atHome: (count: number) => `Evde ${count}\u00a0kutu var.`,
-    notAtHome: (query: string) => `"${query}" evde yok.`,
   },
   /** Who the account is, and what a new box starts with (F1.28). */
   profile: {
@@ -162,6 +159,15 @@ export const tr = {
     done: (name: string) => `${name}: Elden Çıkardım`,
     all: "Hepsini Elden Çıkardım",
     doneNotice: (boxes: number) => `${boxes}\u00a0kutu elden çıkarıldı`,
+    howTitle: "Nasıl atılır",
+    how: [
+      "Çöpe, lavaboya ya da tuvalete atma: ilaç suya ve toprağa karışır.",
+      "Kutusuyla birlikte \"Atık İlaç\" kutusu olan bir eczaneye ya da belediyenin atık getirme merkezine götür.",
+      "Hangi eczanede kutu olduğunu ilçe belediyen ya da eczacı odası söyler.",
+    ],
+    guide: "Sıfır Atık kılavuzu",
+    guideSource: "Çevre, Şehircilik ve İklim Değişikliği Bakanlığı",
+    ask: "Nasıl atılır?",
   },
   cabinet: {
     sift: "Sırala ve Süz",
@@ -285,7 +291,6 @@ export const tr = {
   product: {
     notFound: "Bu ilaç artık dolapta değil.",
     inGuide: "Rehber'de Gör",
-    inGuideHint: "Prospektüs, etken madde ve aynı maddeli ilaçlar",
     notInGuide: "Bu barkod ilaç listesinde yok.",
     guideUnreachable: "İlaç listesine şu an ulaşılamıyor. Biraz sonra yeniden dene.",
     detailsSection: "Bilgiler",
@@ -300,7 +305,7 @@ export const tr = {
     star: "Favori",
     tagsSection: "Etiketler",
     wanted: "Alınacaklar listesinde",
-    wantedHint: "Durum'daki Alınacaklar listesinde görünür; oradan paylaşabilirsin.",
+    edit: "Düzenle",
   },
   box: {
     notFound: "Bu kutu artık dolapta değil.",
@@ -384,6 +389,23 @@ export const tr = {
     kindSection: "Kim?",
     kinds: { self: "Ben", person: "Kişi", pet: "Evcil hayvan" },
     showBoxes: "Kutularını Dolabım'da gör",
+    allergies: "Alerjiler",
+    allergiesHint: "Verilmemesi gereken ilaçlar ve maddeler. Acil durum kartında görünür.",
+    conditions: "Kronik durumlar",
+    conditionsHint: "Astım, diyabet, tansiyon gibi. Acil durum kartında görünür.",
+    none: "Girilmedi",
+    card: "Acil durum kartı",
+  },
+  /** One person's allergies, conditions and current medicines, to show or send (F7.7). */
+  emergency: {
+    title: "Acil Durum Kartı",
+    medicines: "Düzenli kullandığı ilaçlar",
+    noMedicines: "Sürmekte olan doz planı yok",
+    share: "Kartı paylaş",
+    copied: "Kart panoya kopyalandı.",
+    dose: (name: string, amount: string, times: string) => `${name}: ${amount}, ${times}`,
+    text: (name: string, sections: readonly [string, string][]) =>
+      [`${name} — Acil durum kartı`, ...sections.map(([title, body]) => `${title}:\n${body}`), "Fiala ile hazırlandı; kişinin kendi girdiği bilgidir."].join("\n\n"),
   },
   photos: {
     title: "Fotoğraf",
@@ -396,6 +418,7 @@ export const tr = {
     of: (name: string) => `${name} fotoğrafı`,
     denied: "Kamera izni verilmedi. Telefonun ayarlarından Fiala'ya kamera izni verebilirsin.",
     failed: "Fotoğraf alınamadı. Lütfen tekrar dene.",
+    refused: "Bu dosya buluta yüklenemedi: depolama alanın dolu olabilir. Yalnız bu cihazda duruyor; başka cihazların ve hane üyelerin göremez.",
   },
   /** A prescription, a lab result, a letter (F3.1–F3.5): kept beside the boxes it is for. */
   documents: {
@@ -492,6 +515,7 @@ export const tr = {
     everyDay: "Her gün",
     states: { taken: "Alındı", skipped: "Atlandı", snoozed: "Ertelendi", missed: "Kaçırıldı", due: "Zamanı geldi", upcoming: "Sırada", unanswered: "Cevaplanmadı" },
     answers: { taken: "Aldım", skipped: "Atladım", snoozed: "Ertele", missed: "Kaçırdım" },
+    moreAnswers: "Diğer cevaplar",
     answerOf: (answer: string, time: string, name: string) => `${time} ${name}: ${answer}`,
     clear: "Cevabı Kaldır",
     answered: (state: string) => `${state} olarak kaydedildi`,
@@ -613,9 +637,12 @@ export const tr = {
     duplicateTitle: "Bu kutu zaten dolabında",
     duplicateBody: "Aynı barkod ve seri numarasıyla bir kutu var. Aynı kutuyu ikinci kez ekliyor olabilirsin.",
     duplicateConfirm: "Yine de Ekle",
+    sameSubstanceTitle: "Aynı etken madde",
+    sameSubstanceBody: (person: string, other: string, substance: string) =>
+      `${person} için dolapta ${other} var; o da ${substance} içeriyor. İkisini birlikte kullanmak aynı ilacı iki kez almak olabilir. Emin değilsen eczacına ya da hekimine sor.`,
     consentTitle: "Sağlık verisi için açık rıza",
     consentBody:
-      "Fiala'ya ekleyeceğin ilaçlar, kutuları, kullanımları, doz planların ve aldığın, atladığın dozlar, reçete ve tahlil gibi belgelerin ve kime ait oldukları sağlık verisidir; KVKK m. 6'ya göre özel nitelikli kişisel veridir. Bu veriler cihazında ve hesabınla Supabase'in Frankfurt'taki sunucusunda tutulur. Kendi dolabındakileri yalnız sen okursun; bir haneye eklediklerini o hanenin üyeleri de görür. Açık rızanı Ayarlar → Verileri Sıfırla → Dolap ile, dolaptaki verilerle birlikte geri alabilirsin. Ayrıntısı Aydınlatma Metni'nde.",
+      "Fiala'ya ekleyeceğin ilaçlar, kutuları, kullanımları, doz planların ve aldığın, atladığın dozlar, reçete ve tahlil gibi belgelerin, kime ait oldukları ve kişilerin alerjileri ile kronik durumları sağlık verisidir; KVKK m. 6'ya göre özel nitelikli kişisel veridir. Bu veriler cihazında ve hesabınla Supabase'in Frankfurt'taki sunucusunda tutulur. Kendi dolabındakileri yalnız sen okursun; bir haneye eklediklerini o hanenin üyeleri de görür. Açık rızanı Ayarlar → Verileri Sıfırla → Dolap ile, dolaptaki verilerle birlikte geri alabilirsin. Ayrıntısı Aydınlatma Metni'nde.",
     consentConfirm: "Açık Rıza Veriyorum",
     consentRequired: "Açık rıza vermeden ilaç kaydedilmez.",
   },
@@ -748,6 +775,8 @@ export const tr = {
     themeLight: "Açık",
     themeDark: "Koyu",
     palette: "Renk Paleti",
+    paletteSage: "Adaçayı",
+    paletteSageDesc: "Adaçayı keteni, derin deniz yeşili ve kil.",
     paletteClay: "Amber",
     paletteClayDesc: "Sıcak keten, pişmiş toprak ve pirinç.",
     paletteOcean: "Petrol",
@@ -837,6 +866,7 @@ export const tr = {
     at: (hour: number) => `${String(hour).padStart(2, "0")}.00`,
     kinds: {
       dose: "İlaç saati",
+      doseRenew: "Doz hatırlatmaları duracak",
       expirySoon: "Son kullanma tarihi yaklaşıyor",
       expired: "Son kullanma tarihi doldu",
       openSoon: "Açık kutunun süresi bitiyor",
@@ -856,6 +886,7 @@ export const tr = {
       const boxOf = name ? `${name} kutusunun` : "Bir kutunun";
       const said: Record<ReminderKind, string> = {
         dose: name ? `${name} alma saati geldi.` : "Bir ilacın alma saati geldi.",
+        doseRenew: "Sonraki doz hatırlatmaları için Fiala'yı bir kez aç.",
         expirySoon: `${boxOf} son kullanma tarihi yaklaşıyor.`,
         expired: `${boxOf} son kullanma tarihi doldu; elden çıkarmayı düşün.`,
         openSoon: `${boxOf} açıldıktan sonraki kullanım süresi bitiyor.`,
@@ -965,7 +996,7 @@ export const tr = {
     purposeTitle: "4. İşleme amaçları ve hukuki sebepler",
     purposes: [
       "**Hizmetin sunulması, cihazlarınız arasında eşitlenmesi** — kimlik, iletişim ve ayar verisi. Hukuki sebep: KVKK m. 5/2-c, bir sözleşmenin kurulması veya ifasıyla doğrudan ilgili olması.",
-      "**İlaç dolabınızın, belgelerinizin ve doz planlarınızın tutulması, cihazlarınız arasında ve katıldığınız hanelerin üyeleriyle eşitlenmesi** — sağlık verisi. Hukuki sebep: KVKK m. 6, açık rızanız. Rıza vermedikçe hiçbir ilaç kaydedilmez.",
+      "**İlaç dolabınızın, belgelerinizin, doz planlarınızın ve kişilerin alerji ve kronik durumlarının tutulması, cihazlarınız arasında ve katıldığınız hanelerin üyeleriyle eşitlenmesi** — sağlık verisi. Hukuki sebep: KVKK m. 6, açık rızanız. Rıza vermedikçe hiçbir ilaç kaydedilmez.",
       "**Talebinizin karşılanması ve size dönülmesi** — talep ve şikâyet verisi. Hukuki sebep: KVKK m. 5/1, açık rızanız. Formu göndermedikçe bu veri oluşmaz.",
     ],
 
@@ -1006,7 +1037,7 @@ export const tr = {
     selfService: [
       "**Hesabınızı ve buluttaki verilerinizi silmek için:** Ayarlar → Hesabı Sil.",
       "**Yalnız bu cihazı temizlemek için:** Ayarlar → Çıkış Yap.",
-      "**Sağlık verisine verdiğiniz açık rızayı geri almak için:** Ayarlar → Verileri Sıfırla → Dolap. Dolaptaki kayıtlar rızanızla birlikte her cihazınızdan kalkar; bulutta silinmiş olarak işaretlenip hesabınızı silene kadar kalır. Yeniden ilaç eklediğinizde rıza yeniden sorulur.",
+      "**Sağlık verisine verdiğiniz açık rızayı geri almak için:** Ayarlar → Verileri Sıfırla → Dolap. Dolaptaki kayıtlar rızanızla birlikte her cihazınızdan kalkar; bulutta yazdığınız her şey silinir, hesabınızı silene kadar yalnız içeriksiz bir silinme işareti kalır. Yeniden ilaç eklediğinizde rıza yeniden sorulur.",
     ],
 
     contactTitle: "9. Başvuru usulü",

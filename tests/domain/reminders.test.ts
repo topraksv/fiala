@@ -184,8 +184,12 @@ describe("what happened in a household", () => {
 describe("a dose", () => {
   it("is said at its own minute, not the hour, named or not, opening the day's doses, and never in the centre", () => {
     const doses = [{ at: new Date(2026, 8, 23, 20, 30), name: "Coraspin" }, { at: new Date(2026, 8, 23, 20, 30), name: "Coraspin" }, { at: new Date(2026, 8, 23, 19, 30), name: "Parol" }];
-    expect(planReminders(input({ doses }))).toEqual([{ kind: "dose", at: new Date(2026, 8, 23, 20, 30), name: "Coraspin", target: { kind: "doses" } }]);
-    expect(planReminders(input({ doses, names: false })).map((reminder) => reminder.name)).toEqual([null]);
+    expect(planReminders(input({ doses }))).toEqual([
+      { kind: "dose", at: new Date(2026, 8, 23, 20, 30), name: "Coraspin", target: { kind: "doses" } },
+      // The plan's end, a minute after its last dose: a phone left unopened is told, not silenced.
+      { kind: "doseRenew", at: new Date(2026, 8, 23, 20, 31), name: null, target: { kind: "doses" } },
+    ]);
+    expect(planReminders(input({ doses, names: false })).map((reminder) => reminder.name)).toEqual([null, null]);
     expect(planReminders(input({ doses, muted: ["dose"] }))).toEqual([]);
     expect(pastReminders(input({ doses }))).toEqual([]);
   });
@@ -194,10 +198,12 @@ describe("a dose", () => {
     // Latest first, and among the warnings' days: the plan keeps the soonest of each and says them in time order.
     const doses = Array.from({ length: REMINDERS_MAX }, (_, at) => ({ at: new Date(2026, 9, 5, 0, REMINDERS_MAX - at), name: "Coraspin" }));
     const boxes = Array.from({ length: REMINDERS_MAX }, (_, day) => box({ id: idAt(new Date(2026, 8, 1, 0, day)), name: `İlaç ${day}`, expiresOn: `2026-10-${String((day % 20) + 1).padStart(2, "0")}`, soonDays: 1 }));
-    const count = (planned: readonly { kind: string }[]) => planned.filter((reminder) => reminder.kind === "dose").length;
+    // The plan's end takes one of the doses' slots.
+    const count = (planned: readonly { kind: string }[]) => planned.filter((reminder) => reminder.kind === "dose" || reminder.kind === "doseRenew").length;
     const crowded = planReminders(input({ doses, boxes }));
     expect([crowded.length, count(crowded)]).toEqual([REMINDERS_MAX, REMINDERS_MAX / 2]);
-    expect(crowded.filter((reminder) => reminder.kind === "dose").at(-1)!.at, "the soonest half of the doses").toEqual(new Date(2026, 9, 5, 0, REMINDERS_MAX / 2));
+    expect(crowded.filter((reminder) => reminder.kind === "dose").at(-1)!.at, "the soonest half of the doses").toEqual(new Date(2026, 9, 5, 0, REMINDERS_MAX / 2 - 1));
+    expect(crowded.filter((reminder) => reminder.kind === "doseRenew").map((reminder) => reminder.at)).toEqual([new Date(2026, 9, 5, 0, REMINDERS_MAX / 2)]);
     expect(crowded.map((reminder) => reminder.at.getTime())).toEqual([...crowded.map((reminder) => reminder.at.getTime())].sort((a, b) => a - b));
     expect(count(planReminders(input({ doses, boxes: boxes.slice(0, 5) }))), "what the warnings leave").toBe(REMINDERS_MAX - planReminders(input({ boxes: boxes.slice(0, 5) })).length);
     expect(count(planReminders(input({ doses }))), "with no box, no monthly check either").toBe(REMINDERS_MAX);

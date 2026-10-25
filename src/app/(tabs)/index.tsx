@@ -24,13 +24,13 @@ import SlidersHorizontal from "lucide-react-native/icons/sliders-horizontal";
 import type { CabinetBox, CabinetProduct } from "../../data/cabinet";
 import type { CabinetDosePlan } from "../../data/doses";
 import { useDoseAnswers, useDosePlans, useHouseholds, usePeople, useShownCabinet } from "../../data/hooks";
-import { OPENED_SOON_DAYS, SOON_DAYS, daysUntil, expiryState, formatAmount, formatDay, inView, isEmpty, isLow, lastOpenDay, localDay, matchesSearch, type BoxView, type ExpiryState } from "../../domain/boxes";
+import { OPENED_SOON_DAYS, SOON_DAYS, daysUntil, expiryState, formatAmount, formatDay, inView, isEmpty, isLow, lastOpenDay, localDay, type BoxView, type ExpiryState } from "../../domain/boxes";
 import { dosesOfDay, type DayDose } from "../../domain/doses";
 import { tr } from "../../i18n/tr";
 import { canScan } from "../../services/barcode-scan";
 import { Attention } from "../../ui/attention";
 import { openCabinet } from "../../ui/cabinet-link";
-import { Body, Button, Card, EmptyState, IconButton, ListRow, Notice, ReadFailed, Screen, SectionHeader, TextField } from "../../ui/components";
+import { Body, Button, Card, EmptyState, IconButton, ListRow, Notice, ReadFailed, Screen, SectionHeader } from "../../ui/components";
 import { PersonMark } from "../../ui/named-choices";
 import { answerWithUndo } from "../../ui/doses";
 import { useNotices } from "../../ui/notices";
@@ -66,41 +66,6 @@ function sorted(home: Held[], today: string) {
     if (openState === "expired" || openState === "soon") opened.push(held);
   }
   return { by, opened, stock };
-}
-
-/**
- * "Evde var mı?" (`docs/TASKS.md` F1.27): answered where it is asked, from the
- * boxes at home that still hold something, by Dolabım's own search.
- */
-function HomeCheck({ home, subtitle, open }: { home: Held[]; subtitle: (box: CabinetBox) => string; open: (box: CabinetBox) => void }) {
-  const [query, setQuery] = useState("");
-  const asked = query.trim();
-  const found = asked
-    ? home.filter(({ product, box }) => !isEmpty(box) && matchesSearch([product.name, product.brand, product.activeSubstance, product.strength, product.manufacturer, product.gtin, box.nickname], asked))
-    : [];
-  return (
-    <>
-      <SectionHeader>{tr.status.homeCheck}</SectionHeader>
-      <TextField
-        accessibilityLabel={tr.status.homeCheck}
-        value={query}
-        onChangeText={setQuery}
-        examples={tr.cabinet.searchExamples}
-        autoCapitalize="none"
-        autoCorrect={false}
-        maxLength={80}
-        style={{ marginBottom: spacing.sm }}
-      />
-      {asked ? <Body muted>{found.length > 0 ? tr.status.atHome(found.length) : tr.status.notAtHome(asked)}</Body> : null}
-      {found.length > 0 ? (
-        <Card rows>
-          {found.map(({ product, box }) => (
-            <ListRow key={box.id} icon={Package} title={tr.common.boxName(product, box)} subtitle={subtitle(box)} chevron onPress={() => open(box)} />
-          ))}
-        </Card>
-      ) : null}
-    </>
-  );
 }
 
 /** Its time come, the next dose is answered on Durum in one tap; the calendar keeps the other answers. */
@@ -276,7 +241,6 @@ export default function Status() {
           </View>
         </View>
       </Card>
-      <HomeCheck home={home} subtitle={printed} open={open} />
       {by.expired.length + by.soon.length + opened.length === 0 ? <Notice tone="success" text={tr.status.allGood} /> : null}
       <WorkspaceGrid>
         {layout?.order.filter((id) => !layout.hidden.includes(id) && cards[id] != null).map((id) => <Fragment key={id}>{cards[id]}</Fragment>)}

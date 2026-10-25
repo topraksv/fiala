@@ -70,7 +70,7 @@ describe("adding a box", () => {
     expect(all("SELECT id, name, deleted_at FROM products")).toEqual([{ id, name: "Parol Fort", deleted_at: null }]);
   });
 
-  it("adds another box to a held product by its id, with or without a GTIN, and brings it back if deleted meanwhile", async () => {
+  it("adds another box to a held product by its id, with or without a GTIN, and refuses one deleted meanwhile, whose tombstone kept no name", async () => {
     await addPackage("me", { name: "Şurup" }, { unit: "ml" }, 100_000);
     const [{ id }] = all("SELECT id FROM products") as [{ id: string }];
     harness.db!.exec("DELETE FROM outbox");
@@ -78,10 +78,9 @@ describe("adding a box", () => {
     expect(all("SELECT DISTINCT product_id FROM packages")).toEqual([{ product_id: id }]);
     expect(outbox()).toEqual(["packages", "package_moves"]);
     await deleteRows("products", [id]);
-    await addPackage("me", { id }, { unit: "ml" }, 0);
-    expect(all("SELECT name, deleted_at FROM products")).toEqual([{ name: "Şurup", deleted_at: null }]);
+    await expect(addPackage("me", { id }, { unit: "ml" }, 0)).rejects.toThrow(`no product ${id}`);
+    expect(all("SELECT name FROM products")).toEqual([{ name: "" }]);
     await expect(addPackage("me", { id: "none" }, { unit: "ml" }, 0)).rejects.toThrow("no product none");
-    expect(all("SELECT id FROM packages")).toHaveLength(3);
   });
 
   it("makes each product without a GTIN its own", async () => {
@@ -360,12 +359,12 @@ describe("people and places", () => {
     const zeynep = await addNamed("people", "me", "Zeynep");
     await addNamed("people", "me", "Ali");
     expect(await readPeople()).toEqual([
-      { id: expect.any(String), name: "Ali", cabinetId: "me", kind: "person", color: null, warnDays: null, photoId: null, thumb: null },
-      { id: zeynep, name: "Zeynep", cabinetId: "me", kind: "person", color: null, warnDays: null, photoId: null, thumb: null },
+      { id: expect.any(String), name: "Ali", cabinetId: "me", kind: "person", color: null, warnDays: null, photoId: null, thumb: null, allergies: null, conditions: null },
+      { id: zeynep, name: "Zeynep", cabinetId: "me", kind: "person", color: null, warnDays: null, photoId: null, thumb: null, allergies: null, conditions: null },
     ]);
-    await editPerson(zeynep, { kind: "pet", color: "teal", warnDays: 90 });
+    await editPerson(zeynep, { kind: "pet", color: "teal", warnDays: 90, allergies: "Penisilin", conditions: "Astım" });
     await setPhoto("people", zeynep, PHOTO);
-    expect((await readPeople())[1]).toEqual({ id: zeynep, name: "Zeynep", cabinetId: "me", kind: "pet", color: "teal", warnDays: 90, photoId: expect.any(String), thumb: PHOTO.thumb });
+    expect((await readPeople())[1]).toEqual({ id: zeynep, name: "Zeynep", cabinetId: "me", kind: "pet", color: "teal", warnDays: 90, photoId: expect.any(String), thumb: PHOTO.thumb, allergies: "Penisilin", conditions: "Astım" });
     const hers = await addPackage("me", PAROL, { unit: "tablet", personId: zeynep }, 1000);
     const own = await addPackage("me", PAROL, { unit: "tablet", personId: zeynep, warnDays: 7 }, 1000);
     const nobody = await addPackage("me", PAROL, { unit: "tablet" }, 1000);
@@ -373,6 +372,7 @@ describe("people and places", () => {
     expect(await soonDays()).toEqual({ [hers]: 90, [own]: 7, [nobody]: null });
     await deleteRows("people", [zeynep]);
     expect(await soonDays(), "a deleted person's notice goes with them").toEqual({ [hers]: null, [own]: 7, [nobody]: null });
+    expect(all(`SELECT name, allergies, conditions, warn_days FROM people WHERE id = '${zeynep}'`), "their tombstone keeps no health words").toEqual([{ name: "", allergies: null, conditions: null, warn_days: null }]);
     harness.db!.exec("DELETE FROM outbox");
     await editPerson(zeynep, { color: "red" });
     expect(outbox()).toEqual([]);

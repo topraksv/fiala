@@ -10,6 +10,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import Check from "lucide-react-native/icons/check";
 import Minus from "lucide-react-native/icons/minus";
 import Plus from "lucide-react-native/icons/plus";
+import Recycle from "lucide-react-native/icons/recycle";
 import Trash from "lucide-react-native/icons/trash";
 import Undo2 from "lucide-react-native/icons/undo-2";
 import UserCheck from "lucide-react-native/icons/user-check";
@@ -18,7 +19,7 @@ import ListChecks from "lucide-react-native/icons/list-checks";
 import { addNamed, addTo, correctTo, editBoxes, moveBox, setPhoto, takeFrom, type CabinetBox, type CabinetProduct, type Member, type Named } from "../../data/cabinet";
 import { useCabinet, useChanges, useHouseholds, useLocations, useMoves, usePeople } from "../../data/hooks";
 import { deleteRows, undoRows } from "../../db/mutations";
-import { formatAmount, formatDay, lastOpenDay, parseAmount, parseDay, parseDays, SOON_DAYS, WARN_DAYS_MAX } from "../../domain/boxes";
+import { boxExpiry, formatAmount, formatDay, lastOpenDay, localDay, parseAmount, parseDay, parseDays, SOON_DAYS, WARN_DAYS_MAX } from "../../domain/boxes";
 import type { PACKAGE_DISPOSITIONS } from "../../db/schema";
 import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
@@ -232,7 +233,12 @@ export default function BoxScreen() {
 
       <History box={box} unit={unit} people={people.data} locations={locations.data} />
 
-      {box.disposition || !editable ? null : <Leave onLeave={(each) => void leave(each)} />}
+      {box.disposition == null && boxExpiry(box, localDay()) === "expired" ? (
+        <Card rows>
+          <ListRow icon={Recycle} title={tr.toDispose.ask} chevron onPress={() => router.push("/to-dispose")} />
+        </Card>
+      ) : null}
+            {box.disposition || !editable ? null : <Leave onLeave={(each) => void leave(each)} />}
     </Screen>
   );
 }

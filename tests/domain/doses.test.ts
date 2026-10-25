@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { dosesOfDay, dosesToSay, EVERY_DAY, isTime, momentOf, plannedOn, shiftDay, timesOf, weekdayOf, type DoseAnswer, type PlanFacts } from "../../src/domain/doses";
+import { dosesOfDay, dosesToSay, EVERY_DAY, isTime, momentOf, plannedOn, runsOn, shiftDay, timesOf, weekdayOf, type DoseAnswer, type PlanFacts } from "../../src/domain/doses";
 
 const PLAN: PlanFacts = { id: "p1", times: '["20:00","08:00"]', weekdays: EVERY_DAY, startsOn: "2026-10-19", endsOn: null, paused: false };
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute);
@@ -32,6 +32,12 @@ describe("a plan's times and days", () => {
     expect(["2026-10-18", "2026-10-19", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-31"].map((day) => plannedOn(weekend, day))).toEqual([false, false, false, true, true, false]);
     expect(plannedOn({ ...PLAN, startsOn: "2026-10-24" }, "2026-10-24")).toBe(true);
     expect(plannedOn({ ...PLAN, paused: true }, "2026-10-20")).toBe(false);
+  });
+
+  it("runs from its first day to its last whatever the weekday, and not while paused: the emergency card's current medicines", () => {
+    const weekend = { ...PLAN, weekdays: 32 | 64, endsOn: "2026-10-25" };
+    expect(["2026-10-18", "2026-10-19", "2026-10-21", "2026-10-25", "2026-10-26"].map((day) => runsOn(weekend, day))).toEqual([false, true, true, true, false]);
+    expect(runsOn({ ...PLAN, paused: true }, "2026-10-20")).toBe(false);
   });
 });
 

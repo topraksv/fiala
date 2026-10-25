@@ -264,6 +264,28 @@ export function foldName(name: string): string {
     .trim();
 }
 
+/**
+ * The first other medicine in the cabinet with the same active substance, as
+ * written, that the person already has a box of at home (F7.8): two brands of
+ * one substance taken together is the double dose this warns of. Nothing is
+ * inferred: a medicine without a substance written matches nothing. The
+ * caller leaves out the medicine the box is of.
+ */
+export function sameSubstanceHeld<P extends { name: string; activeSubstance?: string | null; boxes: readonly { personId?: string | null; disposition?: string | null }[] }>(
+  products: readonly P[],
+  substance: string | null | undefined,
+  personId: string | null,
+): P | undefined {
+  const folded = substance && foldName(substance);
+  if (!folded || !personId) return undefined;
+  return products.find(
+    (product) =>
+      product.activeSubstance != null &&
+      foldName(product.activeSubstance) === folded &&
+      product.boxes.some((box) => box.personId === personId && box.disposition == null),
+  );
+}
+
 /** With fewer letters, one slip would match half the cabinet: "par" is Parol as much as Majezik's "mar". Gital's. */
 export const TYPO_FROM = 4;
 

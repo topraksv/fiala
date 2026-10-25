@@ -32,6 +32,7 @@ import { spacing, useTheme } from "../ui/theme";
 
 const ICONS: Record<ReminderKind, LucideIcon> = {
   dose: Pill,
+  doseRenew: Pill,
   expirySoon: Clock,
   expired: CalendarX,
   openSoon: CalendarClock,

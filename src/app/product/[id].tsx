@@ -1,23 +1,26 @@
 /**
  * One medicine as the cabinet knows it (`docs/TASKS.md` F1.19): its fields,
  * note and photo, its star and tags (F1.17), whether it is on the list to buy
- * (F1.23), what is left across its boxes and for whom, each box apart, and
- * its dose plans (F3.7).
+ * (F1.23), what is left across its boxes, each box apart, and its dose plans
+ * (F3.7). What is set once — tags, photo, the fields — waits behind "Düzenle"
+ * (F7.14): the page opens on what is left and where.
  * A change here is the product's; a box keeps its own days and amount.
  */
 
+import { useState } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import BookOpen from "lucide-react-native/icons/book-open";
 import Flag from "lucide-react-native/icons/flag";
 import Package from "lucide-react-native/icons/package";
+import Pencil from "lucide-react-native/icons/pencil";
 import Plus from "lucide-react-native/icons/plus";
 import Star from "lucide-react-native/icons/star";
 import Tag from "lucide-react-native/icons/tag";
 import TagPlus from "lucide-react-native/icons/tag-plus";
 
 import { addNamed, editProduct, setPhoto, tagProduct, type CabinetBox, type Named, type ProductFields } from "../../data/cabinet";
-import { useCabinet, useHouseholds, usePeople, useTags } from "../../data/hooks";
+import { useCabinet, useHouseholds, useTags } from "../../data/hooks";
 import { formatAmount, formatDay, printedGtin } from "../../domain/boxes";
 import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
@@ -26,7 +29,7 @@ import { Button, Card, IconButton, ListRow, Missing, Screen, SectionHeader, Togg
 import { appError, appPrompt } from "../../ui/dialog";
 import { LinkedDocuments } from "../../ui/documents";
 import { ProductPlans } from "../../ui/doses";
-import { PersonMark, ViewOnly } from "../../ui/named-choices";
+import { ViewOnly } from "../../ui/named-choices";
 import { PhotoField } from "../../ui/photo-field";
 import { spacing } from "../../ui/theme";
 
@@ -61,7 +64,7 @@ export default function ProductScreen() {
     router.push({ pathname: "/medicine/[id]", params: { id: found[0].id } });
   }
   const cabinet = useCabinet();
-  const people = usePeople();
+  const [more, setMore] = useState(false);
   const allTags = useTags();
   const { writes } = useHouseholds();
   const product = cabinet.data.find((each) => each.id === id);
@@ -105,11 +108,6 @@ export default function ProductScreen() {
 
   // What is left is what is at home: a box lost, thrown away or archived keeps its record, not its count.
   const home = product.boxes.filter((box) => box.disposition == null);
-  const whose = [...new Set(home.map((box) => box.personId))].map((personId) => ({
-    personId,
-    person: people.data.find((person) => person.id === personId),
-    amounts: totals(home.filter((box) => box.personId === personId)),
-  }));
 
   return (
     <Screen
@@ -121,25 +119,6 @@ export default function ProductScreen() {
       <SectionHeader>{tr.product.totalSection}</SectionHeader>
       <Card rows>
         <ListRow title={tr.product.total(totals(home) ?? tr.cabinet.uncounted)} subtitle={tr.cabinet.boxes(home.length)} />
-        {whose.length > 1 || whose[0]?.personId
-          ? whose.map((each) => (
-              <ListRow
-                key={each.personId ?? "none"}
-                leading={each.person ? <PersonMark person={each.person} /> : undefined}
-                title={each.person?.name ?? tr.cabinet.unassigned}
-                subtitle={each.amounts ?? tr.cabinet.uncounted}
-              />
-            ))
-          : null}
-      </Card>
-      {editable ? (
-        <Card rows>
-          <ToggleRow title={tr.product.wanted} subtitle={tr.product.wantedHint} value={product.wanted} onValueChange={(wanted) => void attempt(() => editProduct(product.id, { wanted }))} />
-        </Card>
-      ) : null}
-
-      <SectionHeader>{tr.product.boxesSection}</SectionHeader>
-      <Card rows>
         {product.boxes.map((box) => (
           <ListRow
             key={box.id}
@@ -154,6 +133,7 @@ export default function ProductScreen() {
             onPress={() => router.push({ pathname: "/box/[id]", params: { id: box.id } })}
           />
         ))}
+        {editable ? <ToggleRow title={tr.product.wanted} value={product.wanted} onValueChange={(wanted) => void attempt(() => editProduct(product.id, { wanted }))} /> : null}
       </Card>
       {editable ? (
         <View style={{ marginBottom: spacing.lg }}>
@@ -164,39 +144,46 @@ export default function ProductScreen() {
       <ProductPlans productId={product.id} editable={editable} />
       <LinkedDocuments target={{ product: product.id }} editable={editable} />
 
-      {editable ? (
-        <>
-          <SectionHeader>{tr.product.tagsSection}</SectionHeader>
-          {tags.length > 0 ? (
-            <Card rows>
-              {tags.map((tag) => {
-                const on = product.tagIds.includes(tag.id);
-                return <ListRow key={tag.id} icon={Tag} title={tag.name} selected={on} onPress={() => void attempt(() => tagProduct(product.id, tag.id, !on))} />;
-              })}
-            </Card>
-          ) : null}
-          <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
-            <Button label={tr.names.add.tags} icon={TagPlus} variant="ghost" size="sm" onPress={() => void addTag()} />
-          </View>
-        </>
-      ) : (
-        <ReadTags tags={tags.filter((tag) => product.tagIds.includes(tag.id))} />
-      )}
-
-      <PhotoField name={product.name} photoId={product.photoId} thumb={product.thumb} onChange={changing((photo: NewPhoto | null) => void attempt(() => setPhoto("products", product.id, photo)))} />
-
-      <SectionHeader>{tr.product.detailsSection}</SectionHeader>
-      <Card rows>
-        {FIELDS.map(([field, label, maxLength]) => (
-          <ListRow key={field} title={label} subtitle={product[field] ?? tr.box.unknown} chevron={editable} onPress={changing(() => void change(field, label, maxLength))} />
-        ))}
-        {product.gtin ? <ListRow title={tr.addBox.barcode} subtitle={printedGtin(product.gtin)} /> : null}
-        <ListRow title={tr.product.note} subtitle={product.note ?? tr.product.noteEmpty} chevron={editable} onPress={changing(() => void change("note", tr.product.note, 2000))} />
-      </Card>
       {product.gtin ? (
         <Card rows>
-          <ListRow icon={BookOpen} title={tr.product.inGuide} subtitle={tr.product.inGuideHint} chevron onPress={() => void openInGuide(product.gtin!)} />
+          <ListRow icon={BookOpen} title={tr.product.inGuide} chevron onPress={() => void openInGuide(product.gtin!)} />
         </Card>
+      ) : null}
+      <View style={{ alignItems: "flex-start", marginTop: spacing.md }}>
+        <Button label={editable ? tr.product.edit : tr.product.detailsSection} icon={Pencil} variant="secondary" size="sm" expanded={more} onPress={() => setMore(!more)} />
+      </View>
+      {more ? (
+        <>
+          {editable ? (
+            <>
+              <SectionHeader>{tr.product.tagsSection}</SectionHeader>
+              {tags.length > 0 ? (
+                <Card rows>
+                  {tags.map((tag) => {
+                    const on = product.tagIds.includes(tag.id);
+                    return <ListRow key={tag.id} icon={Tag} title={tag.name} selected={on} onPress={() => void attempt(() => tagProduct(product.id, tag.id, !on))} />;
+                  })}
+                </Card>
+              ) : null}
+              <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
+                <Button label={tr.names.add.tags} icon={TagPlus} variant="ghost" size="sm" onPress={() => void addTag()} />
+              </View>
+            </>
+          ) : (
+            <ReadTags tags={tags.filter((tag) => product.tagIds.includes(tag.id))} />
+          )}
+
+          <PhotoField name={product.name} photoId={product.photoId} thumb={product.thumb} onChange={changing((photo: NewPhoto | null) => void attempt(() => setPhoto("products", product.id, photo)))} />
+
+          <SectionHeader>{tr.product.detailsSection}</SectionHeader>
+          <Card rows>
+            {FIELDS.map(([field, label, maxLength]) => (
+              <ListRow key={field} title={label} subtitle={product[field] ?? tr.box.unknown} chevron={editable} onPress={changing(() => void change(field, label, maxLength))} />
+            ))}
+            {product.gtin ? <ListRow title={tr.addBox.barcode} subtitle={printedGtin(product.gtin)} /> : null}
+            <ListRow title={tr.product.note} subtitle={product.note ?? tr.product.noteEmpty} chevron={editable} onPress={changing(() => void change("note", tr.product.note, 2000))} />
+          </Card>
+        </>
       ) : null}
       {product.gtin ? (
         <View style={{ alignItems: "flex-start", marginTop: spacing.md }}>

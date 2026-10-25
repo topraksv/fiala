@@ -12,6 +12,7 @@ import { useRouter } from "expo-router";
 import CalendarClock from "lucide-react-native/icons/calendar-clock";
 import ChevronLeft from "lucide-react-native/icons/chevron-left";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
+import Ellipsis from "lucide-react-native/icons/ellipsis";
 import Pill from "lucide-react-native/icons/pill";
 import Plus from "lucide-react-native/icons/plus";
 
@@ -29,7 +30,9 @@ import { WEEKDAY_TILE_WIDTH } from "../ui/responsive";
 import { useWriter } from "../ui/named-choices";
 import { controlSize, spacing, useTheme } from "../ui/theme";
 
-const ANSWERS: readonly DoseStatus[] = ["taken", "skipped", "snoozed", "missed"];
+/** The two a dose is mostly given; putting it off and saying it was missed wait behind "…" (F7.14). */
+const ANSWERS: readonly DoseStatus[] = ["taken", "skipped"];
+const MORE_ANSWERS: readonly DoseStatus[] = ["snoozed", "missed"];
 
 /** The Monday of a day's week. */
 /** Days by their place in the week, Monday first. */
@@ -174,14 +177,20 @@ function DoseCard({ dose, plan, said, answerable, onAnswer }: { dose: DayDose; p
 function AnswerButtons({ state, onAnswer }: { state: DayDose["state"]; onAnswer: (status: DoseStatus | null) => void }) {
   // Put off, a dose is still to be answered.
   const final = state === "taken" || state === "skipped" || state === "missed";
+  const [more, setMore] = useState(false);
+  const answer = (status: DoseStatus) => (
+    <Button key={status} label={tr.doses.answers[status]} variant={status === "taken" ? "primary" : "secondary"} size="sm" onPress={() => onAnswer(status)} />
+  );
   return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, paddingBottom: spacing.sm }}>
+    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs, paddingBottom: spacing.sm }}>
       {final ? (
         <Button label={tr.doses.clear} variant="ghost" size="sm" onPress={() => onAnswer(null)} />
       ) : (
-        ANSWERS.filter((status) => status !== state).map((status) => (
-          <Button key={status} label={tr.doses.answers[status]} variant={status === "taken" ? "primary" : "secondary"} size="sm" onPress={() => onAnswer(status)} />
-        ))
+        <>
+          {ANSWERS.map(answer)}
+          <IconButton icon={Ellipsis} label={tr.doses.moreAnswers} on={more} onPress={() => setMore(!more)} />
+          {more ? MORE_ANSWERS.filter((status) => status !== state).map(answer) : null}
+        </>
       )}
     </View>
   );

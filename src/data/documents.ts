@@ -156,7 +156,8 @@ export async function moveDocument(documentId: string, cabinetId: string): Promi
     // The server names the mover as who added it (migration 14).
     writes.push({ table: "documents", row: { ...shape, id, cabinetId, personId: await nameThere("people", document.person_id, cabinetId, writes), createdBy: null } });
     writes.push(...(await relinked("document_id", documentId, id, cabinetId)));
-    writes.push({ table: "documents", row: { ...shape, title: "", personId: null, issuedOn: null, note: null, reference: null, fileId: null, fileType: null, byteSize: null, deletedAt: nowIso() } });
+    // The file follows the new row: a tombstone still naming it could be revived by an editor of the old cabinet.
+    writes.push({ table: "documents", row: { ...shape, fileId: null, fileType: null, byteSize: null, deletedAt: nowIso() } });
     return writes;
   });
   return written.writes.length > 0 ? { id, written } : null;

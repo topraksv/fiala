@@ -25,13 +25,13 @@ export interface ReminderBox extends BoxFacts {
   askedAt?: string | null;
 }
 
-export type ReminderKind = "dose" | "expirySoon" | "expired" | "openSoon" | "openEnded" | "low" | "empty" | "undated" | "check" | HouseholdKind;
+export type ReminderKind = "dose" | "doseRenew" | "expirySoon" | "expired" | "openSoon" | "openEnded" | "low" | "empty" | "undated" | "check" | HouseholdKind;
 /** Said in the centre alone, of the person's households (F2.9, F2.11). */
 export type HouseholdKind = "asked" | "memberJoined" | "boxAdded" | "boxLeft";
 
 /** What a person can silence (F1.29): a warning and its passing are one subject. */
 export const REMINDER_GROUPS = {
-  dose: ["dose"],
+  dose: ["dose", "doseRenew"],
   expiry: ["expirySoon", "expired"],
   opened: ["openSoon", "openEnded"],
   stock: ["low", "empty"],
@@ -171,7 +171,13 @@ export function planReminders(input: ReminderInput): Reminder[] {
   const all = remindersAround(input, true).sort(soonest);
   const doses = all.filter((reminder) => reminder.kind === "dose");
   const others = all.filter((reminder) => reminder.kind !== "dose");
-  const kept = doses.slice(0, Math.max(REMINDERS_MAX / 2, REMINDERS_MAX - others.length));
+  const kept = doses.slice(0, Math.max(REMINDERS_MAX / 2, REMINDERS_MAX - others.length) - 1);
+  // A minute after the last dose planned, the phone says the plan has run out
+  // (F7.13): with many doses a day the slots last days, not the week, and a
+  // phone left unopened would otherwise go quiet without a word. Every open
+  // plans again, so on a phone in use it never rings.
+  const last = kept.at(-1);
+  if (last) kept.push({ kind: "doseRenew", at: new Date(last.at.getTime() + 60_000), name: null, target: { kind: "doses" } });
   return [...kept, ...others.slice(0, REMINDERS_MAX - kept.length)].sort(soonest);
 }
 

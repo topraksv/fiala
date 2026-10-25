@@ -286,11 +286,81 @@ const serviDark: Palette = {
   ...darkSemanticColors,
 };
 
-export type PaletteId = "clay" | "ocean" | "forest";
+// Adaçayı — Fiala's own: sage-washed linen, the kit's deep teal, olive and a
+// warm clay counterweight. The brand kit names one accent, `#3F6B62`; the ramp
+// is built on it as the family builds its three.
+const sageLight: Palette = {
+  background: "#E9EDE8",
+  surface: "#FCFDFB",
+  surfaceAlt: "#DDE4DF",
+  surfaceStrong: "#BAC6BF",
+  border: "#7A8780",
+  controlBorder: "#5C6962",
+  textStrong: "#212A27",
+  text: "#2D3633",
+  textSecondary: "#56625D",
+  textMuted: "#5C6863",
+  primary: "#3F6B62",
+  primaryStrong: "#30564E",
+  primarySoft: "#D9E6E1",
+  accentText: "#335A52",
+  primaryText: "#212A27",
+  onPrimary: "#F3F8F6",
+  secondary: "#66705E",
+  secondaryStrong: "#596352",
+  secondarySoft: "#E4E8DF",
+  secondaryText: "#4F5948",
+  onSecondary: "#F6F8F3",
+  tertiary: "#9A6A55",
+  tertiaryStrong: "#7E5543",
+  tertiarySoft: "#EEDFD7",
+  tertiaryText: "#714B3B",
+  onTertiary: "#FBF5F2",
+  shadow: "rgba(33, 42, 39, 0.06)",
+  shadowStrong: "rgba(33, 42, 39, 0.18)",
+  scrim: "rgba(28, 34, 32, 0.50)",
+  ...lightSemanticColors,
+};
 
-export const DEFAULT_PALETTE_ID: PaletteId = "clay";
+const sageDark: Palette = {
+  background: "#0B0D0D",
+  surface: "#161A19",
+  surfaceAlt: "#212625",
+  surfaceStrong: "#3F4745",
+  border: "#6C7975",
+  controlBorder: "#88948F",
+  textStrong: "#EEF3F1",
+  text: "#DFE7E4",
+  textSecondary: "#B6C4BF",
+  textMuted: "#96A6A0",
+  primary: "#7FB0A4",
+  primaryStrong: "#64978B",
+  primarySoft: "#243734",
+  accentText: "#B3D5CC",
+  primaryText: "#EEF3F1",
+  onPrimary: "#1F302C",
+  secondary: "#AEB79F",
+  secondaryStrong: "#929C83",
+  secondarySoft: "#363C30",
+  secondaryText: "#D3DAC6",
+  onSecondary: "#262A21",
+  tertiary: "#C99A84",
+  tertiaryStrong: "#AF806B",
+  tertiarySoft: "#46342C",
+  tertiaryText: "#E6C4B4",
+  onTertiary: "#2F221C",
+  shadow: "rgba(0, 0, 0, 0.30)",
+  shadowStrong: "rgba(0, 0, 0, 0.52)",
+  scrim: "rgba(5, 6, 5, 0.70)",
+  ...darkSemanticColors,
+};
+
+export type PaletteId = "sage" | "clay" | "ocean" | "forest";
+
+export const DEFAULT_PALETTE_ID: PaletteId = "sage";
 
 export const PALETTES: Record<PaletteId, { light: Palette; dark: Palette }> = {
+  sage: { light: sageLight, dark: sageDark },
   clay: { light: amberLight, dark: amberDark },
   ocean: { light: petrolLight, dark: petrolDark },
   forest: { light: serviLight, dark: serviDark },
@@ -520,23 +590,23 @@ export const sectionMark = { width: 3, height: 18, radius: 2 } as const;
 export const toggleSize = { width: 46, height: 28, padding: 3, glyph: 11, glyphInset: 7 } as const;
 
 /**
- * The mark drawing itself (`src/ui/brand.tsx`), on the brand kit's timeline:
- * the G is traced, then its leaf opens from the stem, swinging in by `leafTurn`
- * degrees. Milliseconds from the first frame.
+ * The mark drawing itself (`src/ui/brand.tsx`), on the brand kit's timeline
+ * (`docs/fiala-brand.zip`, `motion/fiala-motion.json`): the staff is traced,
+ * the thread's turns follow `every` apart, then the three leaves open from
+ * their stems `every` apart, each swinging in by `turn` degrees. Milliseconds
+ * from the first frame.
  */
 export const brandMark = {
-  draw: 900,
-  leafAt: 900,
-  leaf: 220,
-  leafTurn: 8,
+  staff: { at: 0, for: 900 },
+  turns: { at: 180, every: 60, for: 300 },
+  leaves: { at: 900, every: 70, for: 220, turn: 8 },
   /**
    * A cold start's name under the mark (owner, 2026-10-02): it starts writing
-   * as the G is half drawn and finishes with the leaf. Its cap height is the
-   * kit's wordmark files' own, not the lockup's 1.6 scaled to the splash mark,
-   * which would make the name twice as wide as the mark it sits under.
+   * as the staff is half drawn and finishes with the last leaf. Its cap height
+   * is the kit's wordmark file's own, not the lockup's 1.6 scaled to the
+   * splash mark, which would make the name wider than the screen.
    */
   wordAt: 450,
-  word: 670,
   wordCap: 44,
   /**
    * A cold start's mark: the same timeline stretched to `draw`, the finished
@@ -544,10 +614,9 @@ export const brandMark = {
    * fade it was gone before it was seen (owner, 2026-10-02).
    */
   launch: { draw: 2000, rest: 300, fade: 400 },
-  /** The kit's own inks; only the G follows the palette. */
-  weave: "#C98D4C",
-  weaveShade: "#B87C40",
-  leafInk: "#8B9583",
+  /** The side leaves' ink, the kit's, the same on every palette; the thread and
+   *  the middle leaf take the palette's accent, as Helix's and Gital's marks do. */
+  sage: "#8B9583",
   /** What a mask shows through, and what it hides: luminance, never opacity, which a native mask may not read. */
   reveal: "#FFFFFF",
   conceal: "#000000",

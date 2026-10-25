@@ -95,6 +95,9 @@ export const people = sqliteTable("people", {
   /** How many days before a box of theirs runs out it is near its end; none is the cabinet's. */
   warnDays: integer("warn_days"),
   photoId: text("photo_id"),
+  /** What they must not be given, and what they live with, in their own words: the emergency card's (F7.7). */
+  allergies: text("allergies"),
+  conditions: text("conditions"),
 });
 
 /** A place a box is kept: a cupboard, a shelf, a travel bag. */

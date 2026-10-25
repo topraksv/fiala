@@ -5,7 +5,7 @@
  * is chosen, as every field on these pages is.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Image, Platform, Text, View } from "react-native";
 import Camera from "lucide-react-native/icons/camera";
 import ImagePlus from "lucide-react-native/icons/image-plus";
@@ -14,12 +14,19 @@ import type { LucideIcon } from "lucide-react-native";
 
 import { readPhoto, type NewPhoto } from "../data/photos";
 import { tr } from "../i18n/tr";
-import { Body, IconButton } from "./components";
+import { refusedFiles } from "../sync/photos";
+import { Body, IconButton, Notice } from "./components";
 import { appError } from "./dialog";
 import { interactionSurface } from "./interaction";
 import { PhotoViewer } from "./photo-viewer";
 import { Press } from "./press";
 import { borderWidth, circle, font, iconStroke, photoPreview, radius, spacing, type, useTheme } from "./theme";
+
+/** Said on the row of a photo or a document file Storage refused for good (F7.10): it is on this device alone. */
+export function RefusedFile({ id }: { id: string | null | undefined }) {
+  const refused = useSyncExternalStore(refusedFiles.subscribe, () => id != null && refusedFiles.has(id));
+  return refused ? <Notice tone="error" text={tr.photos.refused} /> : null;
+}
 
 const loadTake = () => import("./photo-take").then((module) => module.default);
 
@@ -77,6 +84,7 @@ export function PhotoField({
   return (
     <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
       <Body>{tr.photos.title}</Body>
+      <RefusedFile id={photoId} />
       {shown ? (
         <View>
           <Press accessibilityRole="button" accessibilityLabel={tr.common.withDetail(tr.photos.enlarge, tr.photos.of(name))} onPress={() => setEnlarged(true)}>

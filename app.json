@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fiala",
     "slug": "fiala",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "fiala",
@@ -96,11 +96,11 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F1EDE8",
+          "backgroundColor": "#E9EDE8",
           "image": "./assets/brand/splash-blank.png",
           "imageWidth": 150,
           "dark": {
-            "backgroundColor": "#090807"
+            "backgroundColor": "#0B0D0D"
           }
         }
       ],

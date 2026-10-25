@@ -6,7 +6,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(60);
+select extensions.plan(61);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -66,6 +66,29 @@ insert into public.products (cabinet_id, id, name) values
 update public.cabinets set photo_id = 'e0000000-0000-7000-8000-00000000000e' where id = 'c0000000-0000-7000-8000-00000000000c';
 insert into storage.objects (bucket_id, name, owner_id) values
   ('photos', 'e0000000-0000-7000-8000-00000000000e/full.jpg', '10000000-0000-4000-8000-000000000001');
+
+-- A deletion undone by another member keeps the photo A sent (migration 20):
+-- the tombstone keeps its id, so the undo names nothing new.
+insert into public.products (cabinet_id, id, name, photo_id) values
+  ('c0000000-0000-7000-8000-00000000000c', 'a2000000-0000-7000-8000-00000000000a', 'Majezik', 'e1000000-0000-7000-8000-00000000000e');
+insert into storage.objects (bucket_id, name, owner_id) values
+  ('photos', 'e1000000-0000-7000-8000-00000000000e/full.jpg', '10000000-0000-4000-8000-000000000001');
+select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000002', true);
+set local role authenticated;
+update public.products set deleted_at = now() where id = 'a2000000-0000-7000-8000-00000000000a';
+update public.products set deleted_at = null, name = 'Majezik', photo_id = 'e1000000-0000-7000-8000-00000000000e', tombstone_version = 1
+  where id = 'a2000000-0000-7000-8000-00000000000a';
+set local role postgres;
+select is(
+  (select name || ' ' || photo_id from public.products where id = 'a2000000-0000-7000-8000-00000000000a'),
+  'Majezik e1000000-0000-7000-8000-00000000000e',
+  'an editor''s undo of a deletion keeps the photo the owner sent'
+);
+-- Gone again, so the counts below are the household's own.
+delete from public.products where id = 'a2000000-0000-7000-8000-00000000000a';
+select set_config('storage.allow_delete_query', 'true', true);
+delete from storage.objects where name = 'e1000000-0000-7000-8000-00000000000e/full.jpg';
+select set_config('storage.allow_delete_query', 'false', true);
 
 -- D, outside.
 select set_config('request.jwt.claim.sub', '40000000-0000-4000-8000-000000000004', true);

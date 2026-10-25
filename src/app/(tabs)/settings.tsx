@@ -55,6 +55,7 @@ const THEMES: readonly [ThemePreference, string][] = [
 ];
 
 const FAMILIES: readonly [PaletteId, string, string][] = [
+  ["sage", tr.settings.paletteSage, tr.settings.paletteSageDesc],
   ["clay", tr.settings.paletteClay, tr.settings.paletteClayDesc],
   ["ocean", tr.settings.paletteOcean, tr.settings.paletteOceanDesc],
   ["forest", tr.settings.paletteForest, tr.settings.paletteForestDesc],

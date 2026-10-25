@@ -18,7 +18,8 @@ export const HEALTH_CONSENT = "health_consent";
 /** Raised when the consent's text changes what it covers, so it is asked again. */
 // 2: a household's members read what is added to it (F2.2), which the first text said only the person did.
 // 3: documents and their files (F3.1), a prescription's or a lab result's, which no earlier text named.
-const HEALTH_CONSENT_VERSION = 3;
+// 4: a person's allergies and chronic conditions (F7.7), which no earlier text named.
+const HEALTH_CONSENT_VERSION = 4;
 
 interface Setting {
   key: string;

@@ -18,6 +18,7 @@ import {
   lastOpenDay,
   localDay,
   matchesSearch,
+  sameSubstanceHeld,
   nearly,
   TYPO_FROM,
   normalGtin,
@@ -270,6 +271,27 @@ describe("searching the cabinet", () => {
   it("knows one letter's slip from two", () => {
     for (const [a, b] of [["abcd", "abcd"], ["abcd", "abxd"], ["abcd", "abd"], ["abd", "abcd"], ["abcd", "bacd"], ["abcd", "abdc"], ["", "a"]]) expect(nearly(a!, b!), `${a} ${b}`).toBe(true);
     for (const [a, b] of [["abcd", "axyd"], ["abcd", "ab"], ["abcd", "badc"], ["abcd", "acbx"], ["abcd", "xbcda"], ["abcd", "abdcx"], ["abc", "bca"], ["abcd", "axbd"]]) expect(nearly(a!, b!), `${a} ${b}`).toBe(false);
+  });
+});
+
+describe("another medicine of the same substance", () => {
+  const box = (personId: string | null, disposition: string | null = null) => ({ personId, disposition });
+  const cabinet = [
+    { name: "Parol", activeSubstance: "Parasetamol", boxes: [box("zeynep", "used")] },
+    { name: "Minoset", activeSubstance: "PARASETAMOL ", boxes: [box("ali")] },
+    { name: "Vitamin", activeSubstance: null, boxes: [box("ali")] },
+  ];
+
+  it("is found for the person who holds a box of it at home, however its substance is cased", () => {
+    expect(sameSubstanceHeld(cabinet, "parasetamol", "ali")?.name).toBe("Minoset");
+  });
+
+  it("is not found for someone else, for a box gone from home, or without a substance or a person", () => {
+    expect(sameSubstanceHeld(cabinet, "parasetamol", "zeynep")).toBeUndefined();
+    expect(sameSubstanceHeld(cabinet, "ibuprofen", "ali")).toBeUndefined();
+    expect(sameSubstanceHeld(cabinet, null, "ali")).toBeUndefined();
+    expect(sameSubstanceHeld(cabinet, "", "ali")).toBeUndefined();
+    expect(sameSubstanceHeld(cabinet, "parasetamol", null)).toBeUndefined();
   });
 });
 

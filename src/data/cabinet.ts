@@ -60,12 +60,12 @@ function assertAmount(milli: number, allowZero: boolean): void {
  * reviewed now; without a GTIN, each add is a product of its own.
  */
 async function productWrite(cabinetId: string, product: ProductFields | { id: string }): Promise<{ id: string; cabinetId: string; writes: RowWrite[] }> {
-  // Another box of a product already held: only a delete made meanwhile on another device needs undoing, and editRow writes nothing otherwise.
   // The box goes where its product is, which may be a household rather than the cabinet asked for.
   if ("id" in product) {
     const held = await findRow("products", product.id);
-    if (!held) throw new Error(`no product ${product.id}`);
-    return { id: product.id, cabinetId: String(held.cabinet_id), writes: editRow("products", held, { deletedAt: null }) };
+    // Deleted meanwhile on another device, its tombstone kept no name to bring back (F7.11): the add is refused.
+    if (!held || held.deleted_at != null) throw new Error(`no product ${product.id}`);
+    return { id: product.id, cabinetId: String(held.cabinet_id), writes: [] };
   }
   const gtin = product.gtin || null;
   const id = gtin ? await deterministicId(naturalKeys.product(cabinetId, gtin)) : uuidv7();
@@ -590,20 +590,25 @@ export interface Person extends Named {
   warnDays: number | null;
   photoId: string | null;
   thumb: string | null;
+  allergies: string | null;
+  conditions: string | null;
 }
 
 /** The people boxes are for, with what tells them apart and their own notice ahead of an expiry. */
 export async function readPeople(): Promise<Person[]> {
   const sqlite = await getSqliteAsync();
   const rows = await sqlite.getAllAsync<Person>(
-    `SELECT id, name, cabinet_id AS cabinetId, kind, color, warn_days AS warnDays, photo_id AS photoId, (SELECT thumb FROM photos WHERE id = photo_id) AS thumb
+    `SELECT id, name, cabinet_id AS cabinetId, kind, color, warn_days AS warnDays, photo_id AS photoId, (SELECT thumb FROM photos WHERE id = photo_id) AS thumb, allergies, conditions
        FROM people WHERE deleted_at IS NULL AND ${inLiveCabinet("cabinet_id")}`,
   );
   return rows.sort((a, b) => a.name.localeCompare(b.name, "tr"));
 }
 
-/** A person's colour or notice ahead of an expiry; `null` goes back to the default. */
-export async function editPerson(id: string, patch: { kind?: Person["kind"]; color?: Person["color"]; warnDays?: number | null }): Promise<void> {
+/** A person's colour, notice ahead of an expiry or health words; `null` goes back to the default. */
+export async function editPerson(
+  id: string,
+  patch: { kind?: Person["kind"]; color?: Person["color"]; warnDays?: number | null; allergies?: string | null; conditions?: string | null },
+): Promise<void> {
   return writeRows(async () => {
     const there = await findRow("people", id);
     return there && there.deleted_at == null ? editRow("people", there, patch) : [];

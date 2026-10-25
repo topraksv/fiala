@@ -28,8 +28,26 @@ const NAMED = [...PHOTO_TABLES].map((table) => `SELECT photo_id FROM ${table} WH
 
 /** Photos Storage answered for with no file, not asked again until the next launch. */
 const unavailable = new Set<string>();
-/** Photos Storage refused for good, not offered again until the next launch. */
+/**
+ * Photos and document files Storage refused for good, by id, not offered
+ * again until the next launch. The row's screen says so (F7.10): it stays on
+ * this device alone, and nothing else would tell.
+ */
 const refused = new Set<string>();
+const heard = new Set<() => void>();
+
+export function refuse(id: string): void {
+  refused.add(id);
+  for (const listener of heard) listener();
+}
+
+export const refusedFiles = {
+  has: (id: string) => refused.has(id),
+  subscribe(listener: () => void): () => void {
+    heard.add(listener);
+    return () => heard.delete(listener);
+  },
+};
 
 /** A data URI's bytes, or bare base64's. */
 export function bytesOf(dataUri: string): Uint8Array {
@@ -106,7 +124,7 @@ export async function sendPendingPhotos(supabase: SupabaseClient, signal: AbortS
   for (const photo of pending) {
     if (refused.has(photo.id)) continue;
     if (await sendPhoto(supabase, photo, signal)) await sqlite.runAsync("UPDATE photos SET uploaded_at = ? WHERE id = ?", [nowIso(), photo.id]);
-    else refused.add(photo.id);
+    else refuse(photo.id);
   }
 }
 

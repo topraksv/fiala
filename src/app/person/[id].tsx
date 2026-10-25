@@ -1,16 +1,19 @@
 /**
  * One person boxes are for (`docs/TASKS.md` F1.20): their name, the colour or
- * photo their boxes are told apart by, and their own notice ahead of an
- * expiry, which their boxes take unless a box was given its own.
+ * photo their boxes are told apart by, their own notice ahead of an expiry,
+ * which their boxes take unless a box was given its own, and the allergies
+ * and conditions their emergency card shows (F7.7).
  */
 
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import HeartPulse from "lucide-react-native/icons/heart-pulse";
 import Pill from "lucide-react-native/icons/pill";
 import Trash from "lucide-react-native/icons/trash";
 
 import { editPerson, renameNamed, setPhoto } from "../../data/cabinet";
-import { useCabinet, useHouseholds, usePeople } from "../../data/hooks";
+import { useCabinet, useHouseholds, usePeople, useSettings } from "../../data/hooks";
+import { giveHealthConsent, hasHealthConsent } from "../../data/settings";
 import { PERSON_COLORS } from "../../db/schema";
 import { deleteRows, undoRows } from "../../db/mutations";
 import { parseDays, SOON_DAYS, WARN_DAYS_MAX } from "../../domain/boxes";
@@ -26,6 +29,8 @@ import { controlSize, personMark, spacing } from "../../ui/theme";
 import { showUndo } from "../../ui/undo";
 
 const COLORS = [null, ...PERSON_COLORS] as const;
+// The server's bound on both columns (migration 19).
+const HEALTH_MAX = 500;
 // "self" is not chosen here: the profile says which person is the one using the app.
 const KINDS = ["person", "pet"] as const;
 
@@ -34,6 +39,7 @@ export default function PersonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const people = usePeople();
+  const settings = useSettings();
   const cabinet = useCabinet();
   const { writes } = useHouseholds();
   const person = people.data.find((each) => each.id === id);
@@ -69,6 +75,16 @@ export default function PersonScreen() {
     await attempt(() => editPerson(person.id, { warnDays }));
   };
 
+  const changeHealth = async (field: "allergies" | "conditions") => {
+    const typed = (await appPrompt(tr.person[field], tr.person[`${field}Hint`], { confirmLabel: tr.common.save, initialValue: person[field] ?? "", maxLength: HEALTH_MAX, multiline: true }))?.trim();
+    if (typed == null || typed === (person[field] ?? "")) return;
+    if (typed && !hasHealthConsent(settings.data)) {
+      if (!(await appConfirm(tr.addBox.consentTitle, tr.addBox.consentBody, tr.addBox.consentConfirm))) return;
+      await giveHealthConsent();
+    }
+    await attempt(() => editPerson(person.id, { [field]: typed || null }));
+  };
+
   const remove = async () => {
     if (!(await appConfirm(tr.names.remove(person.name), tr.names.removeBody.people, tr.names.removeConfirm))) return;
     try {
@@ -94,6 +110,7 @@ export default function PersonScreen() {
 
       <Card rows>
         <ListRow icon={Pill} title={tr.person.showBoxes} chevron onPress={() => openCabinet({ person: person.id })} />
+        <ListRow icon={HeartPulse} title={tr.person.card} chevron onPress={() => router.push({ pathname: "/emergency/[id]", params: { id: person.id } })} />
         <ListRow title={tr.person.name} subtitle={person.name} chevron={editable} onPress={editable ? () => void rename() : undefined} />
         <ListRow
           title={tr.box.warn}
@@ -101,6 +118,9 @@ export default function PersonScreen() {
           chevron={editable}
           onPress={editable ? () => void changeWarn() : undefined}
         />
+        {(["allergies", "conditions"] as const).map((field) => (
+          <ListRow key={field} title={tr.person[field]} subtitle={person[field] ?? tr.person.none} chevron={editable} onPress={editable ? () => void changeHealth(field) : undefined} />
+        ))}
       </Card>
 
       {editable ? (
