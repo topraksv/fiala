@@ -81,7 +81,9 @@ async function planned(me: string | null): Promise<Reminder[]> {
   const boxes = cabinet.flatMap((product) => product.boxes.map((box) => ({ ...box, name: tr.common.boxName(product, box) })));
   const ringing = plans.filter((plan) => ringsHere(plan, me, chosen));
   const doses = dosesToSay(ringing, answers, now, DOSE_DAYS).map(({ planId, at }) => ({ at, name: ringing.find((plan) => plan.id === planId)!.name }));
-  return planReminders({ now, boxes, names, hour, muted, doses });
+  const after = shiftDay(today, DOSE_DAYS);
+  const dosesGoOn = ringing.some((plan) => !plan.paused && (plan.endsOn == null || plan.endsOn > after));
+  return planReminders({ now, boxes, names, hour, muted, doses, dosesGoOn });
 }
 
 // Planning at start and at every trip to the background can overlap; each waits for the last.

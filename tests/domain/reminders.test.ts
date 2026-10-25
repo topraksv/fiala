@@ -184,12 +184,15 @@ describe("what happened in a household", () => {
 describe("a dose", () => {
   it("is said at its own minute, not the hour, named or not, opening the day's doses, and never in the centre", () => {
     const doses = [{ at: new Date(2026, 8, 23, 20, 30), name: "Coraspin" }, { at: new Date(2026, 8, 23, 20, 30), name: "Coraspin" }, { at: new Date(2026, 8, 23, 19, 30), name: "Parol" }];
-    expect(planReminders(input({ doses }))).toEqual([
+    expect(planReminders(input({ doses })), "a plan that ends inside the days given ends quietly").toEqual([
+      { kind: "dose", at: new Date(2026, 8, 23, 20, 30), name: "Coraspin", target: { kind: "doses" } },
+    ]);
+    expect(planReminders(input({ doses, dosesGoOn: true }))).toEqual([
       { kind: "dose", at: new Date(2026, 8, 23, 20, 30), name: "Coraspin", target: { kind: "doses" } },
       // The plan's end, a minute after its last dose: a phone left unopened is told, not silenced.
       { kind: "doseRenew", at: new Date(2026, 8, 23, 20, 31), name: null, target: { kind: "doses" } },
     ]);
-    expect(planReminders(input({ doses, names: false })).map((reminder) => reminder.name)).toEqual([null, null]);
+    expect(planReminders(input({ doses, dosesGoOn: true, names: false })).map((reminder) => reminder.name)).toEqual([null, null]);
     expect(planReminders(input({ doses, muted: ["dose"] }))).toEqual([]);
     expect(pastReminders(input({ doses }))).toEqual([]);
   });

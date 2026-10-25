@@ -168,8 +168,11 @@ export async function moveBox(packageId: string, cabinetId: string): Promise<{ i
   const written = await writeUndoable(async () => {
     const box = await findRow("packages", packageId);
     if (!box || box.deleted_at != null || box.cabinet_id === cabinetId) return [];
-    // A box's product is never deleted from under it, only tombstoned.
+    // A box's product is never deleted from under it, only tombstoned, and a
+    // tombstone keeps no name to make one by there: an add undone on another
+    // device leaves a box so, and it stays where it is.
     const product = (await findRow("products", String(box.product_id)))!;
+    if (product.deleted_at != null) return [];
     const sqlite = await getSqliteAsync();
     const { id: productId, writes } = await productThere(cabinetId, product);
     const { tombstoneVersion: _, ...shape } = fromDbShape("packages", box);
@@ -210,7 +213,7 @@ export async function moveBox(packageId: string, cabinetId: string): Promise<{ i
     for (const plan of await sqlite.getAllAsync<Record<string, unknown>>("SELECT * FROM dose_plans WHERE package_id = ? AND deleted_at IS NULL", [packageId])) {
       writes.push(...editRow("dose_plans", plan, { packageId: id }));
     }
-    writes.push({ table: "packages", row: { ...shape, deletedAt: nowIso() } });
+    writes.push({ table: "packages", row: { ...shape, deletedAt: nowIso() } }, ...(await historyGone(packageId)));
     return writes;
   });
   return written.writes.length > 0 ? { id, written } : null;
@@ -356,6 +359,31 @@ export async function editProduct(productId: string, patch: Partial<Omit<Product
     const there = await findRow("products", productId);
     return there && there.deleted_at == null ? editRow("products", there, patch) : [];
   });
+}
+
+/**
+ * Delete boxes, each with its history: a change row holds the words a box had,
+ * its note and nickname before and after, and a tombstone keeps none (F7.11).
+ * One write `undoRows` takes back whole, the history with its box; `null` when
+ * every box was already gone.
+ */
+export async function deleteBoxes(packageIds: readonly string[]): Promise<RowsWritten | null> {
+  const written = await writeUndoable(async () => {
+    const writes: RowWrite[] = [];
+    for (const id of new Set(packageIds)) {
+      const there = await findRow("packages", id);
+      if (there && there.deleted_at == null) writes.push({ table: "packages", row: { ...fromDbShape("packages", there), deletedAt: nowIso() } }, ...(await historyGone(id)));
+    }
+    return writes;
+  });
+  return written.writes.length > 0 ? written : null;
+}
+
+/** The tombstones of a box's live change rows. */
+async function historyGone(packageId: string): Promise<RowWrite[]> {
+  const sqlite = await getSqliteAsync();
+  const rows = await sqlite.getAllAsync<Record<string, unknown>>("SELECT * FROM package_changes WHERE package_id = ? AND deleted_at IS NULL", [packageId]);
+  return rows.map((row) => ({ table: "package_changes" as const, row: { ...fromDbShape("package_changes", row), deletedAt: nowIso() } }));
 }
 
 /**

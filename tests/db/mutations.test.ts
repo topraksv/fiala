@@ -160,6 +160,7 @@ describe("a tombstone", () => {
   it("keeps no words and no choice, but its ids, parents and file", () => {
     const gone = { id: ID, deletedAt: "2026-10-25T00:00:00.000Z" };
     expect(scrubTombstone("tags", { ...gone, cabinetId: "me", name: "Ağrı" })).toEqual({ ...gone, cabinetId: "me", name: "" });
+    expect(scrubTombstone("locations", { ...gone, name: "Annemin evi" })).toEqual({ ...gone, name: "" });
     expect(scrubTombstone("products", { ...gone, photoId: "p", starred: true, wanted: true })).toMatchObject({ photoId: "p", name: "", starred: false, wanted: false });
     expect(scrubTombstone("packages", { ...gone, productId: "x", photoId: "p", unit: "tablet", note: "Mutfak" })).toMatchObject({ productId: "x", photoId: "p", unit: "tablet", note: null, personId: null, checkAskedAt: null });
     expect(scrubTombstone("package_changes", { ...gone, packageId: "b", changes: '{"note":"x"}' })).toEqual({ ...gone, packageId: "b", changes: "{}" });

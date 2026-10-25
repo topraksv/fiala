@@ -238,6 +238,27 @@ describe("doses", () => {
     expect(moments[0]!.getTime() - Date.now()).toBeGreaterThan(8 * 60_000);
   });
 
+  it("say a plan's doses run out only when it goes on past the week they cover", async () => {
+    phone.boxes = [];
+    const [today, soon] = time(10);
+    const renew = () => calls.filter((call) => call.startsWith("date fiala-reminders: Doz hatırlatmaları duracak"));
+    phone.plans = [{ ...plan("p1", "Coraspin", ME, soon), endsOn: shiftDay(today, 7) }];
+    await enableReminders(ME);
+    expect(renew(), "it ends on the week's last day").toEqual([]);
+    phone.plans = [{ ...plan("p1", "Coraspin", ME, soon), endsOn: shiftDay(today, 8) }];
+    calls.length = 0;
+    await replanReminders(ME);
+    expect(renew()).toHaveLength(1);
+    phone.plans = [{ ...plan("p1", "Coraspin", ME, soon), endsOn: shiftDay(today, 7) }, plan("p2", "Ventolin", ME, soon)];
+    calls.length = 0;
+    await replanReminders(ME);
+    expect(renew(), "one plan with no end is enough").toHaveLength(1);
+    phone.plans = [{ ...plan("p1", "Coraspin", ME, soon), endsOn: shiftDay(today, 8), paused: true }];
+    calls.length = 0;
+    await replanReminders(ME);
+    expect(renew(), "a paused plan says nothing").toEqual([]);
+  });
+
   it("say a dose of yesterday's put off until now, past midnight", async () => {
     phone.boxes = [];
     const [today] = time(0);

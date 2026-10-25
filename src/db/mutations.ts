@@ -111,6 +111,7 @@ const TOMBSTONE_BLANKS: Partial<Record<SyncedTableName, Record<string, unknown>>
   people: { name: "", color: null, warnDays: null, allergies: null, conditions: null },
   products: { name: "", brand: null, activeSubstance: null, strength: null, form: null, pack: null, manufacturer: null, gtin: null, note: null, starred: false, wanted: false },
   tags: { name: "" },
+  locations: { name: "" },
   packages: {
     personId: null, locationId: null, expiresOn: null, openedOn: null, useWithinDays: null, lowMilli: null, serial: null, lot: null, nickname: null,
     acquiredOn: null, acquiredFrom: null, note: null, disposition: null, warnDays: null, checkOf: null, checkAskedAt: null,

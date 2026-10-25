@@ -121,6 +121,8 @@ export interface ReminderInput {
   events?: readonly Reminder[];
   /** The doses this phone says (`dosesToSay`), each at its own moment, not the hour: never in the centre. */
   doses?: readonly { at: Date; name: string }[];
+  /** Whether a plan that rings here runs past the days `doses` covers: only then does their end need a word. */
+  dosesGoOn?: boolean;
 }
 
 /**
@@ -175,9 +177,10 @@ export function planReminders(input: ReminderInput): Reminder[] {
   // A minute after the last dose planned, the phone says the plan has run out
   // (F7.13): with many doses a day the slots last days, not the week, and a
   // phone left unopened would otherwise go quiet without a word. Every open
-  // plans again, so on a phone in use it never rings.
+  // plans again, so on a phone in use it never rings; plans that end inside
+  // the days given have nothing left to say.
   const last = kept.at(-1);
-  if (last) kept.push({ kind: "doseRenew", at: new Date(last.at.getTime() + 60_000), name: null, target: { kind: "doses" } });
+  if (last && (kept.length < doses.length || input.dosesGoOn)) kept.push({ kind: "doseRenew", at: new Date(last.at.getTime() + 60_000), name: null, target: { kind: "doses" } });
   return [...kept, ...others.slice(0, REMINDERS_MAX - kept.length)].sort(soonest);
 }
 

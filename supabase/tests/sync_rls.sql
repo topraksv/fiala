@@ -8,7 +8,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(63);
+select extensions.plan(64);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -260,6 +260,13 @@ select is(
   (select name || allergies from public.people where id = 'd7000000-0000-7000-8000-00000000000c'),
   'Velipolen',
   'a living person keeps both'
+);
+insert into public.locations (cabinet_id, id, name, deleted_at) values
+  ('10000000-0000-4000-8000-000000000001', 'd8000000-0000-7000-8000-00000000000c', 'Annemin evi', now());
+select is(
+  (select name from public.locations where id = 'd8000000-0000-7000-8000-00000000000c'),
+  '',
+  'a deleted place keeps no name on the server'
 );
 select is(
   pg_temp.exec_sqlstate($$insert into public.packages (cabinet_id, id, product_id, unit, check_of) values

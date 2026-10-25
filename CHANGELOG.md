@@ -8,6 +8,15 @@ Notlar kısa tutulur: ne değişti, tek cümle. Sebebi ve ölçümü commit'te.
 `scripts/release-notes.mjs` bir bölümü etiketinin GitHub sürüm notuna çevirir;
 bölümü olmayan sürüm yayımlanamaz.
 
+## 0.2.1
+
+### Patch Changes
+
+- Silinen ya da taşınan kutunun değişiklik geçmişi de siliniyor ve içindeki not, takma ad ve seri buluttan kalkıyor; geri alma geçmişi kutuyla birlikte getiriyor.
+- Silinen bir saklama yerinin adı buluttan da siliniyor.
+- "Doz hatırlatmaları duracak" bildirimi yalnız haftadan uzun süren bir plan varken geliyor; hafta içinde biten plan sessizce bitiyor.
+- İlacı başka cihazda silinmiş bir kutu başka dolaba taşınmıyor; önceden adsız bir ilaç oluşup senkronda takılıyordu.
+
 ## 0.2.0
 
 ### Minor Changes

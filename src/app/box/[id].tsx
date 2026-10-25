@@ -16,9 +16,9 @@ import Undo2 from "lucide-react-native/icons/undo-2";
 import UserCheck from "lucide-react-native/icons/user-check";
 import ListChecks from "lucide-react-native/icons/list-checks";
 
-import { addNamed, addTo, correctTo, editBoxes, moveBox, setPhoto, takeFrom, type CabinetBox, type CabinetProduct, type Member, type Named } from "../../data/cabinet";
+import { addNamed, addTo, correctTo, deleteBoxes, editBoxes, moveBox, setPhoto, takeFrom, type CabinetBox, type CabinetProduct, type Member, type Named } from "../../data/cabinet";
 import { useCabinet, useChanges, useHouseholds, useLocations, useMoves, usePeople } from "../../data/hooks";
-import { deleteRows, undoRows } from "../../db/mutations";
+import { undoRows } from "../../db/mutations";
 import { boxExpiry, formatAmount, formatDay, lastOpenDay, localDay, parseAmount, parseDay, parseDays, SOON_DAYS, WARN_DAYS_MAX } from "../../domain/boxes";
 import type { PACKAGE_DISPOSITIONS } from "../../db/schema";
 import type { NewPhoto } from "../../data/photos";
@@ -151,7 +151,7 @@ export default function BoxScreen() {
   const remove = async () => {
     if (!(await appConfirm(tr.box.deleteTitle, tr.box.deleteBody, tr.box.delete))) return;
     try {
-      const written = await deleteRows("packages", [box.id]);
+      const written = await deleteBoxes([box.id]);
       navigateBack(router, "/cabinet");
       if (written) showUndo(tr.box.deleted(product.name), () => undoRows(written));
     } catch {

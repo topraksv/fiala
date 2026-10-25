@@ -15,12 +15,12 @@ import SlidersHorizontal from "lucide-react-native/icons/sliders-horizontal";
 import Trash from "lucide-react-native/icons/trash";
 import X from "lucide-react-native/icons/x";
 
-import { editBoxes, type CabinetBox, type CabinetProduct, type Household, type Named, type NamedTable } from "../../data/cabinet";
+import { deleteBoxes, editBoxes, type CabinetBox, type CabinetProduct, type Household, type Named, type NamedTable } from "../../data/cabinet";
 import { useDocuments, useHouseholds, useLocations, usePeople, useShownCabinet, useTags } from "../../data/hooks";
 import { BOX_VIEWS, SOON_DAYS, boxExpiry, expiryState, formatAmount, formatDay, inView, lastOpenDay, localDay, matchesSearch, sortProducts, type BoxView } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
 import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, useTileColumns, Screen, TextField } from "../../ui/components";
-import { deleteRows, undoRows } from "../../db/mutations";
+import { undoRows } from "../../db/mutations";
 import { takeCabinetFilter } from "../../ui/cabinet-link";
 import { appError } from "../../ui/dialog";
 import { radioGroupKeys } from "../../ui/keys";
@@ -158,8 +158,8 @@ export default function Cabinet() {
     const ids = chosenIds();
     selection.clear();
     try {
-      const written = await deleteRows("packages", ids);
-      if (written) showUndo(tr.selection.deleted(written.writes.length), () => undoRows(written));
+      const written = await deleteBoxes(ids);
+      if (written) showUndo(tr.selection.deleted(written.writes.filter((write) => write.table === "packages").length), () => undoRows(written));
     } catch {
       await appError(tr.errors.deleteFailed);
     }
