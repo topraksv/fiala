@@ -66,7 +66,11 @@ describe("a document", () => {
     expect((await readDocuments())[0]!.archived).toBe(false);
     const deleted = (await deleteDocuments([id]))!;
     expect(await readDocuments()).toEqual([]);
+    const waiting = all("SELECT COUNT(*) AS n, MAX(created_at) AS at FROM outbox");
+    await new Promise((resolve) => setTimeout(resolve, 2));
     await editDocument(id, { title: "Silinmiş" });
+    await editDocument("0190c000-0000-7000-8000-000000000000", { title: "Yok" });
+    expect(all("SELECT COUNT(*) AS n, MAX(created_at) AS at FROM outbox"), "an edit of a deleted or missing one sends nothing").toEqual(waiting);
     expect((await archiveDocuments([id], true)).writes, "nothing reaches a deleted one").toEqual([]);
     expect(await moveDocument(id, await openHousehold("me", "Ev"))).toBeNull();
     expect(all(`SELECT title, archived FROM documents WHERE id = '${id}'`), "the tombstone keeps no words").toEqual([{ title: "", archived: 0 }]);

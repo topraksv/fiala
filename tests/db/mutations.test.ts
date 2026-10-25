@@ -14,7 +14,7 @@ vi.mock("../../src/db/client", async () => {
   return sqliteClientMock(() => harness.db!);
 });
 
-const { deleteRows, editRow, findRow, fromDbShape, nowIso, onLocalWrite, pendingOutboxCount, resetLocalWorkspace, undoRows, writeRows } = await import("../../src/db/mutations");
+const { deleteRows, editRow, findRow, fromDbShape, nowIso, onLocalWrite, pendingOutboxCount, resetLocalWorkspace, scrubTombstone, undoRows, writeRows } = await import("../../src/db/mutations");
 const { migratedDatabase } = await import("../helpers");
 
 const ID = "019f6bba-2c65-7ea8-a6c9-96d891155e01";
@@ -153,6 +153,20 @@ describe("deleting and undoing", () => {
     const written = (await deleteRows("settings", [ID]))!;
     harness.db!.exec("DELETE FROM settings");
     await expect(undoRows(written)).rejects.toThrow(/has changed since/);
+  });
+});
+
+describe("a tombstone", () => {
+  it("keeps no words and no choice, but its ids, parents and file", () => {
+    const gone = { id: ID, deletedAt: "2026-10-25T00:00:00.000Z" };
+    expect(scrubTombstone("tags", { ...gone, cabinetId: "me", name: "Ağrı" })).toEqual({ ...gone, cabinetId: "me", name: "" });
+    expect(scrubTombstone("products", { ...gone, photoId: "p", starred: true, wanted: true })).toMatchObject({ photoId: "p", name: "", starred: false, wanted: false });
+    expect(scrubTombstone("packages", { ...gone, productId: "x", photoId: "p", unit: "tablet", note: "Mutfak" })).toMatchObject({ productId: "x", photoId: "p", unit: "tablet", note: null, personId: null, checkAskedAt: null });
+    expect(scrubTombstone("package_changes", { ...gone, packageId: "b", changes: '{"note":"x"}' })).toEqual({ ...gone, packageId: "b", changes: "{}" });
+    expect(scrubTombstone("documents", { ...gone, fileId: "f", title: "Reçete" })).toMatchObject({ fileId: "f", title: "", reference: null });
+    expect(scrubTombstone("dose_plans", { ...gone, productId: "x", instructions: "Tok" })).toEqual({ ...gone, productId: "x", instructions: null });
+    expect(scrubTombstone("settings", { ...gone, value: "1" }), "a row with no words is left whole").toEqual({ ...gone, value: "1" });
+    expect(scrubTombstone("tags", { id: ID, deletedAt: null, name: "Ağrı" }), "a live row is left whole").toEqual({ id: ID, deletedAt: null, name: "Ağrı" });
   });
 });
 
