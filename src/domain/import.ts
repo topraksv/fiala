@@ -7,7 +7,7 @@
 
 import { foldName, parseAmount, parseDay, readBoxCode } from "./boxes";
 
-export const IMPORT_FIELDS = [
+const IMPORT_FIELDS = [
   "name",
   "brand",
   "activeSubstance",

@@ -323,7 +323,7 @@ const checkCircle = {
 } as const;
 
 /** Gital's: the empty ring, or the accent circle and its tick popping in, for a row chosen in a selection. */
-export function CheckMark({ checked }: { checked: boolean }) {
+function CheckMark({ checked }: { checked: boolean }) {
   const { palette } = useTheme();
   return checked ? (
     <SuccessPop>

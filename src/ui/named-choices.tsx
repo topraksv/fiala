@@ -22,7 +22,7 @@ import { radioGroupKeys } from "./keys";
 import { circle, controlSize, font, personColors, personMark, spacing, type, useTheme } from "./theme";
 
 /** The colour of a person given none: the one their id falls on, so it is the same on every device. */
-export function colorOf(person: Pick<Person, "id" | "color">): (typeof PERSON_COLORS)[number] {
+function colorOf(person: Pick<Person, "id" | "color">): (typeof PERSON_COLORS)[number] {
   if (person.color) return person.color;
   const sum = [...person.id].reduce((total, char) => total + char.charCodeAt(0), 0);
   return PERSON_COLORS[sum % PERSON_COLORS.length]!;

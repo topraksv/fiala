@@ -19,7 +19,7 @@ import { getSupabase } from "./supabase";
 const BUCKET = "documents";
 const FILE = { pdf: ["pdf", "application/pdf"], jpeg: ["jpg", "image/jpeg"] } as const satisfies Record<DocumentFileType, readonly [string, string]>;
 
-export const documentPath = (fileId: string, type: DocumentFileType) => `${fileId}/file.${FILE[type][0]}`;
+const documentPath = (fileId: string, type: DocumentFileType) => `${fileId}/file.${FILE[type][0]}`;
 
 /** The files a live row names. */
 const NAMED = "SELECT file_id FROM documents WHERE deleted_at IS NULL AND file_id IS NOT NULL";

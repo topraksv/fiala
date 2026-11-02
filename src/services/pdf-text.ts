@@ -15,7 +15,7 @@ const MAX_INFLATED_BYTES = 8 * MAX_PDF_BYTES;
 /** Total text kept. A statement's text layer is far smaller than this. */
 const MAX_TEXT_LENGTH = 4_000_000;
 
-export type PdfFailure =
+type PdfFailure =
   | "not_a_pdf"
   | "too_large"
   | "encrypted"

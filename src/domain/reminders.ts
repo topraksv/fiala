@@ -27,7 +27,7 @@ export interface ReminderBox extends BoxFacts {
 
 export type ReminderKind = "dose" | "doseRenew" | "expirySoon" | "expired" | "openSoon" | "openEnded" | "low" | "empty" | "undated" | "check" | HouseholdKind;
 /** Said in the centre alone, of the person's households (F2.9, F2.11). */
-export type HouseholdKind = "asked" | "memberJoined" | "boxAdded" | "boxLeft";
+type HouseholdKind = "asked" | "memberJoined" | "boxAdded" | "boxLeft";
 
 /** What a person can silence (F1.29): a warning and its passing are one subject. */
 export const REMINDER_GROUPS = {

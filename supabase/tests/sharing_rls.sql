@@ -6,7 +6,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(61);
+select extensions.plan(63);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -196,6 +196,20 @@ select is(
   (select role || ':' || name || ':' || (deleted_at is null) from public.cabinet_members where user_id = '10000000-0000-4000-8000-000000000001'),
   'owner:Ömer:true',
   'nor touch the owner''s row'
+);
+-- Migration 22: an editor cannot carry a household's row into a cabinet of their own.
+update public.products set cabinet_id = '20000000-0000-4000-8000-000000000002'
+ where id = 'a1000000-0000-7000-8000-00000000000a';
+select is(
+  (select cabinet_id from public.products where id = 'a1000000-0000-7000-8000-00000000000a'),
+  'c0000000-0000-7000-8000-00000000000c'::uuid,
+  'an editor''s update of a row''s cabinet leaves it in the household'
+);
+select is(
+  (select count(*) from pg_catalog.pg_trigger t join pg_catalog.pg_class c on c.oid = t.tgrelid
+    where t.tgname = 'keep_row_cabinet' and c.relnamespace = 'public'::regnamespace),
+  12::bigint,
+  'every cabinet-scoped row keeps its cabinet'
 );
 
 -- C, a viewer.

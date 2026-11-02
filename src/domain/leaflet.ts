@@ -8,7 +8,7 @@
  * without three of the five is not a leaflet here.
  */
 
-export type LeafletSection = { number: 1 | 2 | 3 | 4 | 5; paragraphs: string[] };
+type LeafletSection = { number: 1 | 2 | 3 | 4 | 5; paragraphs: string[] };
 export type Leaflet = { sections: LeafletSection[]; approvedOn: string | null };
 
 /** Fewer found is a text that only mentions a heading, not a leaflet. */

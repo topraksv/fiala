@@ -23,7 +23,7 @@ import { useReducedMotion } from "./motion";
 import { brandMark, PALETTES, useTheme } from "./theme";
 
 /** The drawing's width over its height (`ASPECT` in `brand-art.ts`), known before its chunk arrives. */
-export const MARK_ASPECT = 0.4223;
+const MARK_ASPECT = 0.4223;
 
 type Art = typeof import("./brand-art");
 let art: Art | undefined;

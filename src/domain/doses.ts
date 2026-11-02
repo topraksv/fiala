@@ -83,7 +83,7 @@ export interface DoseAnswer extends Dose {
 }
 
 /** A dose and its answer; `due` has come and not been answered, `upcoming` has not come. */
-export type DoseState = DoseStatus | "due" | "upcoming" | "unanswered";
+type DoseState = DoseStatus | "due" | "upcoming" | "unanswered";
 
 export interface DayDose extends Dose {
   state: DoseState;
