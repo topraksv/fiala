@@ -89,10 +89,16 @@ jobs:
         run: |
           set -euo pipefail
           # `check-published.mjs green` says why it filters nothing in the query.
-          green=$(node scripts/check-published.mjs green | sed -n 's/^sha=//p') || green=""
+          published=$(node scripts/check-published.mjs green) || published=""
+          green=$(printf '%s\n' "$published" | sed -n 's/^sha=//p')
+          # The newest run whose mutation shards passed, failed elsewhere or not:
+          # its mutants are proven, so an e2e-only fix does not re-mutate them.
+          mutated=$(printf '%s\n' "$published" | sed -n 's/^mutated=//p')
           if [ -n "$green" ] && ! git merge-base --is-ancestor "$green" "$HEAD_SHA"; then green=""; fi
+          if [ -n "$mutated" ] && ! git merge-base --is-ancestor "$mutated" "$HEAD_SHA"; then mutated=""; fi
+          [ -n "$mutated" ] || mutated="$green"
           base=""
-          mutation="$green"
+          mutation="$mutated"
           if [ "$EVENT_NAME" = "push" ]; then
             base="$BEFORE_SHA"
             if [ -n "$green" ]; then
@@ -104,7 +110,7 @@ jobs:
               # itself have failed, so an empty diff runs everything instead.
               if git diff --quiet "$BEFORE_SHA" "$HEAD_SHA" 2>/dev/null; then base=""; fi
             fi
-            mutation="$base"
+            mutation="${mutated:-$base}"
             # Everything runs, mutation too: from the empty tree, every scoped
             # file is changed. A push with no base used to fail the selector.
             if [ -z "$mutation" ]; then mutation="$(git hash-object -t tree /dev/null)"; fi
@@ -217,8 +223,9 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     env:
-      # The last green run, so mutation covers every change that has not yet
-      # passed a gate — a failed run's included — and not only this push's.
+      # The last run whose mutation passed, so mutation covers every change
+      # that has not yet passed it — a failed run's included — and not only
+      # this push's.
       MUTATION_BASE_SHA: ${{ needs.classify.outputs.mutation_base }}
       MUTATION_HEAD_SHA: ${{ github.sha }}
       MUTATION_EVENT_NAME: ${{ github.event_name }}

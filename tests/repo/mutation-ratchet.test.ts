@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { evaluate as evaluateMutation, recordedFrom, scoreOf } from "../../scripts/check-mutation-ratchet.mjs";
@@ -48,15 +48,35 @@ describe("mutation ratchet", () => {
 
   // Vitest 5 matches a name filter against "suite > test", which Stryker 10
   // does not send, so a mutant's covering tests are run by file instead.
-  it("runs a mutant's covering tests by their files, not by a name Vitest 5 would not match", async () => {
+  it("runs a mutant's covering tests by their files, and a static one by the tests that load its file", async () => {
     const { strykerPlugins } = await import("../../scripts/stryker-vitest-files.mjs");
-    const calls: unknown[] = [];
-    const upstream = { run: (options: unknown) => calls.push(options) };
+    const calls: { testFiles?: string[]; relatedFiles?: string[] }[] = [];
+    const upstream = {
+      run: (options: { testFiles?: string[]; relatedFiles?: string[] }) => calls.push(options),
+      // The upstream shape: a mutant run is a run of its covering tests, none named for a static mutant.
+      mutantRun(this: { run: (options: object) => unknown }, options: { testFilter?: string[]; sandboxFileName: string }) {
+        return this.run({ testIds: options.testFilter, relatedFiles: [options.sandboxFileName] });
+      },
+    };
     const injector = { provideValue: () => ({ injectClass: () => upstream }) };
     // `run` is the upstream runner's own method, not part of Stryker's `TestRunner` contract.
-    const runner = strykerPlugins[0]!.factory(injector) as unknown as { run: (options: object) => void };
+    const runner = strykerPlugins[0]!.factory(injector) as unknown as {
+      run: (options: object) => void;
+      mutantRun: (options: object) => Promise<unknown>;
+    };
     runner.run({ testIds: ["tests/a.test.ts#suite one", "tests/a.test.ts#suite two", "tests/b.test.ts#other"], relatedFiles: ["x"] });
     runner.run({ relatedFiles: ["x"] });
     expect(calls).toEqual([{ relatedFiles: ["x"], testFiles: ["tests/a.test.ts", "tests/b.test.ts"] }, { relatedFiles: ["x"] }]);
+
+    calls.length = 0;
+    const loader = resolve(process.cwd(), "scripts/stryker-vitest-files.mjs");
+    await runner.mutantRun({ sandboxFileName: loader });
+    expect(calls[0]?.testFiles).toEqual(expect.arrayContaining([resolve(process.cwd(), "tests/repo/mutation-ratchet.test.ts")]));
+    expect(calls[0]?.testFiles?.every((file) => file.endsWith(".test.ts"))).toBe(true);
+    // A dry run, and a mutant with covering tests, are not narrowed by the graph.
+    await runner.mutantRun({ testFilter: ["tests/a.test.ts#one"], sandboxFileName: loader });
+    expect(calls[1]?.testFiles).toEqual(["tests/a.test.ts"]);
+    runner.run({ relatedFiles: [loader] });
+    expect(calls[2]).toEqual({ relatedFiles: [loader] });
   });
 });

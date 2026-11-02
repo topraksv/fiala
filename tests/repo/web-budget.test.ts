@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { appStoreMajor, appVersionOf, entryOf, greenRun, openRuns, otaRecord, titleOf } from "../../scripts/check-published.mjs";
+import { appStoreMajor, appVersionOf, entryOf, greenRun, mutationProven, openRuns, otaRecord, titleOf } from "../../scripts/check-published.mjs";
 import { catalogueRows, gtinOf, newestList } from "../../scripts/import-catalogue.mjs";
 
 const root = join(import.meta.dirname, "../..");
@@ -28,6 +28,14 @@ describe("check-published", () => {
     expect(greenRun(runs, "d")).toBeNull();
     expect(openRuns(runs, "h")).toBe(1);
     expect(openRuns(runs, "g")).toBe(0);
+  });
+
+  it("takes a run's mutants as proven only when every shard that ran passed", () => {
+    const job = (name: string, conclusion: string) => ({ name, conclusion });
+    expect(mutationProven([job("mutation (1)", "success"), job("mutation (2)", "success"), job("e2e (chromium 1/6)", "failure")])).toBe(true);
+    expect(mutationProven([job("mutation (1)", "success"), job("mutation (2)", "failure")])).toBe(false);
+    expect(mutationProven([job("mutation (1)", "skipped")])).toBe(false);
+    expect(mutationProven([job("check", "success")])).toBe(false);
   });
 
   it("reads the entry bundle a shell under the site's base references", () => {

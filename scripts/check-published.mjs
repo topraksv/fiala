@@ -22,7 +22,11 @@
  *
  * `green` prints `sha=…` and `url=…` for the newest green `ci` push run on
  * `main` — with `--sha`, that commit's — and with `--head`, `open=…`, how many
- * push runs of that commit are still going.
+ * push runs of that commit are still going. It also prints `mutated=…`: the
+ * newest push run whose mutation shards all passed, green or not, because a
+ * run that failed on a browser test has still proved its mutants, and
+ * measuring from the last green run instead re-mutated a whole release for an
+ * e2e-only fix (26 minutes).
  */
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -121,6 +125,15 @@ export function greenRun(runs, sha) {
   return runs.find((run) => run.event === "push" && run.head_branch === "main" && run.conclusion === "success" && (!sha || run.head_sha === sha)) ?? null;
 }
 
+/** Whether a run's jobs prove its mutants: at least one mutation shard ran, and every one passed. */
+export function mutationProven(jobs) {
+  const shards = jobs.filter((job) => /^mutation\b/.test(job.name));
+  return shards.length > 0 && shards.every((job) => job.conclusion === "success");
+}
+
+/** How many failed runs newer than the green one are asked for their jobs; each is one API call. */
+const MUTATED_LOOKBACK = 5;
+
 /** Push runs of `head` on `main` that have not finished. */
 export const openRuns = (runs, head) =>
   runs.filter((run) => run.event === "push" && run.head_branch === "main" && run.head_sha === head && run.status !== "completed").length;
@@ -142,6 +155,23 @@ async function checkGreen({ sha, head }) {
   }
   const run = greenRun(runs, sha);
   process.stdout.write(`sha=${run?.head_sha ?? ""}\nurl=${run?.html_url ?? ""}\n`);
+  if (!sha) {
+    const newer = runs.slice(0, run ? runs.indexOf(run) : runs.length)
+      .filter((candidate) => candidate.event === "push" && candidate.head_branch === "main" && candidate.status === "completed" && candidate.conclusion !== "success")
+      .slice(0, MUTATED_LOOKBACK);
+    let mutated = run?.head_sha ?? "";
+    for (const candidate of newer) {
+      const response = await fetch(`${candidate.jobs_url}?per_page=100`, {
+        headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: "application/vnd.github+json" },
+      });
+      if (!response.ok) break;
+      if (mutationProven((await response.json()).jobs ?? [])) {
+        mutated = candidate.head_sha;
+        break;
+      }
+    }
+    process.stdout.write(`mutated=${mutated}\n`);
+  }
   if (head) process.stdout.write(`open=${openRuns(runs, head)}\n`);
 }
 

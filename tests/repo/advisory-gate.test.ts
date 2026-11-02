@@ -6,7 +6,9 @@ import {
   blockingAdvisories,
   evaluate,
   evaluateUnaudited,
+  inRange,
   newAdvisories,
+  remedies,
   unregisteredPackages,
 } from "../../scripts/check-advisories.mjs";
 
@@ -270,5 +272,53 @@ describe("unaudited dependencies", () => {
     // The caller treats an empty scan as a failure. This is the distinction it
     // depends on: a page whose shape changed reads exactly like a clean one.
     expect(newAdvisories("<html>no identifiers here</html>", ["CVE-2023-30533"]).seen).toEqual([]);
+  });
+
+  it("reads npm audit's ranges as npm prints them", () => {
+    expect(inRange("6.16.0", ">=6.7.0 <=6.16.0")).toBe(true);
+    expect(inRange("6.16.1", ">=6.7.0 <=6.16.0")).toBe(false);
+    expect(inRange("10.2.6", "<11.0.1")).toBe(true);
+    expect(inRange("1.0.0", "<0.5.0 || >=0.9.0 <2.0.0")).toBe(true);
+    expect(inRange("0.7.0", "<0.5.0 || >=0.9.0 <2.0.0")).toBe(false);
+    expect(inRange("2.0.0-beta.1", "<3.0.0")).toBe(false);
+  });
+
+  // qs 6.16.0 sat behind a pinned override while 6.16.1 had been out nineteen days, because a moderate advisory blocked nothing.
+  describe("a fix within the installed major", () => {
+    const vulnerable = (name: string, range: string, severity: string, nodes = [`node_modules/${name}`]) => ({
+      [name]: { nodes, via: [{ ...advisory(`GHSA-${name}`, severity, name), range }] },
+    });
+    const installed = (versions: Record<string, string>) => (node: string) => versions[node];
+    const NOW = "2026-11-03T12:00:00.000Z";
+
+    it("fails at any severity once the fix has cleared the quarantine", () => {
+      const audit = report(vulnerable("qs", ">=6.7.0 <=6.16.0", "moderate"));
+      const fixes = remedies(audit, installed({ "node_modules/qs": "6.16.0" }), () => ({ "6.16.0": "2026-09-01T00:00:00Z", "6.16.1": "2026-10-14T22:06:17Z", "7.0.0": "2026-01-01T00:00:00Z" }), NOW);
+      expect(fixes.get("GHSA-qs")?.fixes).toEqual([{ node: "node_modules/qs", installed: "6.16.0", version: "6.16.1", clears: "2026-10-21T22:06:17.000Z", ready: true }]);
+      const { problems } = evaluate(audit, [], TODAY, fixes);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatch(/^FIXABLE GHSA-qs \(qs, moderate\)[\s\S]*6\.16\.0 at node_modules\/qs -> 6\.16\.1/);
+    });
+
+    it("waits without an entry while the fix is inside the quarantine, even for a high advisory", () => {
+      const audit = report(vulnerable("forge", "<=1.4.0", "high"));
+      const fixes = remedies(audit, installed({ "node_modules/forge": "1.4.0" }), () => ({ "1.4.0": "2026-03-24T00:00:00Z", "1.4.1": "2026-10-27T04:44:07Z" }), "2026-11-03T04:44:06.000Z");
+      const { problems, waiting } = evaluate(audit, [], TODAY, fixes);
+      expect(problems).toEqual([]);
+      expect(waiting.map((remedy: { id: string }) => remedy.id)).toEqual(["GHSA-forge"]);
+      const later = remedies(audit, installed({ "node_modules/forge": "1.4.0" }), () => ({ "1.4.1": "2026-10-27T04:44:07Z" }), "2026-11-03T04:44:07.000Z");
+      expect(evaluate(audit, [], TODAY, later).problems[0]).toMatch(/^FIXABLE GHSA-forge/);
+    });
+
+    it("carries a fix that needs a new major, and still asks a high one for an entry", () => {
+      const releases = () => ({ "10.2.6": "2026-01-01T00:00:00Z", "11.0.1": "2026-10-01T00:00:00Z" });
+      const moderate = report(vulnerable("minimatch", "<11.0.1", "moderate"));
+      const carried = remedies(moderate, installed({ "node_modules/minimatch": "10.2.6" }), releases, NOW);
+      expect(carried.get("GHSA-minimatch")?.stuck).toEqual(["10.2.6 at node_modules/minimatch"]);
+      expect(evaluate(moderate, [], TODAY, carried).problems).toEqual([]);
+      const high = report(vulnerable("minimatch", "<11.0.1", "high"));
+      const stuck = remedies(high, installed({ "node_modules/minimatch": "10.2.6" }), releases, NOW);
+      expect(evaluate(high, [], TODAY, stuck).problems[0]).toMatch(/^UNACKNOWLEDGED GHSA-minimatch/);
+    });
   });
 });
