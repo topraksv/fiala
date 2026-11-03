@@ -2,9 +2,11 @@ version: 2
 # Dependabot opens nothing: both ecosystems are capped at zero open pull
 # requests because delivery is commits to `main`. `security.yml` still reports
 # vulnerable versions. The ignore list records what must not move on its own,
-# and applies again if a limit is raised.
+# and applies again if a limit is raised. No cooldown: a release installs the
+# day it ships unless an advisory names it (`scripts/check-advisories.mjs`), so
+# zizmor's seven-day cooldown audit is ignored on each ecosystem.
 updates:
-  - package-ecosystem: npm
+  - package-ecosystem: npm # zizmor: ignore[dependabot-cooldown]
     directory: /
     schedule:
       interval: weekly
@@ -50,7 +52,7 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
-  - package-ecosystem: github-actions
+  - package-ecosystem: github-actions # zizmor: ignore[dependabot-cooldown]
     directory: /
     schedule:
       interval: weekly
