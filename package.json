@@ -94,6 +94,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "overrides": {
+    "node-forge": "1.4.1",
     "@expo/cli": {
       "zod": "^4.6.6"
     },
