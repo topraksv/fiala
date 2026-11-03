@@ -1,7 +1,6 @@
-// Fails on any advisory, whatever its severity, that a release within the installed major fixes once that release has
-// cleared .npmrc's seven-day quarantine; on any high or critical advisory with no such release that is not individually
-// examined and written down here; and on any entry that stopped matching. A fix still inside the quarantine is waited for
-// without an entry and fails the day it clears, so the quarantine and "fix what can be fixed" never ask for opposite things.
+// Fails on any advisory, whatever its severity, that a published release within the installed major fixes; on any high
+// or critical advisory with no such release that is not individually examined and written down here; and on any entry
+// that stopped matching. A new release is installed the day it ships unless an advisory names it: there is no age wait.
 // --omit=dev hides nothing useful because Expo and React Native declare their build tooling as ordinary dependencies.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -25,9 +24,6 @@ const UNAUDITED = [
 
 const BLOCKING = new Set(["high", "critical"]);
 
-// `.npmrc`'s `min-release-age`, which CI's npm 10 does not read; the gate applies it itself.
-const QUARANTINE_DAYS = 7;
-
 const parse = (version) => {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   return match ? match.slice(1).map(Number) : null;
@@ -50,15 +46,14 @@ export function inRange(version, range) {
 
 /**
  * Per advisory, any severity: the oldest release that leaves its range within an installed copy's major, so the
- * parents' caret ranges already admit it. `clears` is when it leaves the quarantine; `ready` whether it has.
+ * parents' caret ranges already admit it.
  * A copy with no such release is listed in `stuck`: its fix is a major the parent must move to, or none exists.
  *
  * @param {{ vulnerabilities?: Record<string, any> }} report
  * @param {(node: string) => string | undefined} installedAt version at a `node_modules/...` path
- * @param {(name: string) => Record<string, string>} releasesOf version → ISO publish time, as `npm view <name> time`
- * @param {string} now ISO timestamp
+ * @param {(name: string) => Record<string, string>} releasesOf keyed by version, as `npm view <name> time`
  */
-export function remedies(report, installedAt, releasesOf, now) {
+export function remedies(report, installedAt, releasesOf) {
   const found = new Map();
   for (const [name, entry] of Object.entries(report.vulnerabilities ?? {})) {
     for (const via of entry.via ?? []) {
@@ -78,8 +73,7 @@ export function remedies(report, installedAt, releasesOf, now) {
           remedy.stuck.push(`${installed} at ${node}`);
           continue;
         }
-        const clears = new Date(Date.parse(fix[1]) + QUARANTINE_DAYS * 86_400_000).toISOString();
-        remedy.fixes.push({ node, installed, version: fix[0], clears, ready: now >= clears });
+        remedy.fixes.push({ node, installed, version: fix[0] });
       }
     }
   }
@@ -154,24 +148,18 @@ export function evaluate(report, acknowledgements = ACKNOWLEDGED, today = new Da
   const acknowledged = new Map(acknowledgements.map((entry) => [entry.id, entry]));
   const problems = [];
   const accepted = [];
-  const waiting = [];
 
   for (const remedy of fixes.values()) {
-    const ready = remedy.fixes.filter((fix) => fix.ready);
-    if (ready.length > 0) {
-      problems.push(
-        `FIXABLE ${remedy.id} (${remedy.package}, ${remedy.severity}): ${remedy.title}\n` +
-          ready.map((fix) => `  ${fix.installed} at ${fix.node} -> ${fix.version}, out of quarantine since ${fix.clears.slice(0, 10)}`).join("\n") +
-          `\n  Move the lock to it (\`npm update ${remedy.package}\`, or the override in package.json), whatever the severity.`,
-      );
-    } else if (remedy.fixes.length > 0 && remedy.stuck.length === 0) {
-      waiting.push(remedy);
-    }
+    if (remedy.fixes.length === 0) continue;
+    problems.push(
+      `FIXABLE ${remedy.id} (${remedy.package}, ${remedy.severity}): ${remedy.title}\n` +
+        remedy.fixes.map((fix) => `  ${fix.installed} at ${fix.node} -> ${fix.version}`).join("\n") +
+        `\n  Move the lock to it (\`npm update ${remedy.package}\`, or the override in package.json), whatever the severity.`,
+    );
   }
 
   for (const [id, advisory] of advisories) {
-    if (waiting.some((remedy) => remedy.id === id)) continue;
-    if (fixes.get(id)?.fixes.some((fix) => fix.ready)) continue;
+    if (fixes.get(id)?.fixes.length > 0) continue;
     const entry = acknowledged.get(id);
     if (entry) {
       const expected = entry.expectedPaths ?? [];
@@ -217,7 +205,7 @@ export function evaluate(report, acknowledgements = ACKNOWLEDGED, today = new Da
     }
   }
 
-  return { advisories, accepted, waiting, problems };
+  return { advisories, accepted, problems };
 }
 
 /**
@@ -340,8 +328,8 @@ if (import.meta.main) {
   const report = audit();
   const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
   const releasesOf = (name) => JSON.parse(execFileSync("npm", ["view", name, "time", "--json"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
-  const fixes = remedies(report, (node) => lock.packages?.[node]?.version, releasesOf, new Date().toISOString());
-  const { advisories, accepted, waiting, problems } = evaluate(report, ACKNOWLEDGED, undefined, fixes);
+  const fixes = remedies(report, (node) => lock.packages?.[node]?.version, releasesOf);
+  const { advisories, accepted, problems } = evaluate(report, ACKNOWLEDGED, undefined, fixes);
 
   const unregistered = unregisteredPackages(lock);
   // A development dependency installs too: Fiala's xlsx runs only in CI's catalogue import.
@@ -358,12 +346,8 @@ if (import.meta.main) {
     console.log(`accepted ${entry.id} (${entry.package}), last checked ${entry.checkedOn}`);
     console.log(`      ${entry.reason}`);
   }
-  for (const remedy of waiting) {
-    const clears = remedy.fixes.map((fix) => fix.clears).sort().at(-1);
-    console.log(`waiting ${remedy.id} (${remedy.package}, ${remedy.severity}): ${remedy.fixes[0].version} clears the quarantine ${clears}; this gate fails from then until the lock moves`);
-  }
   for (const remedy of fixes.values()) {
-    if (remedy.stuck.length > 0 && !remedy.fixes.some((fix) => fix.ready)) {
+    if (remedy.stuck.length > 0 && remedy.fixes.length === 0) {
       console.log(`carried ${remedy.id} (${remedy.package}, ${remedy.severity}): no release in the installed major fixes ${remedy.stuck.join(", ")}`);
     }
   }

@@ -575,8 +575,7 @@ jobs:
       #   addon, postinstall), which the CLI does not need to start.
       # - `npm_config_before` resolves every transitive range as it stood on a
       #   fixed day, so nothing published after that day can enter, however it
-      #   was published. `.npmrc`'s `min-release-age` would do this on a rolling
-      #   window and does nothing on the npm Node 22 ships. Move the date with
+      #   was published. Move the date with
       #   `eas.json`'s CLI version: a date before a release refuses it outright,
       #   which is the loud failure to want.
       - name: Install the pinned EAS CLI without the credential

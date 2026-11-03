@@ -31,7 +31,7 @@ concurrency:
 # actions only, and a refused action fails before any log says why. Pinned, so
 # a scheduled run turns red only for a reason of ours.
 env:
-  SUPABASE: npx --yes supabase@2.118.0
+  SUPABASE: npx --yes supabase@3.0.0
 
 jobs:
   rls:
@@ -47,7 +47,7 @@ jobs:
       # Before the assertions, so a schema fault reads as one rather than as a
       # page of failed tests. The `extensions` schema holds pgTAP's internals,
       # which the linter cannot resolve; `public` is what this repository owns.
-      - run: $SUPABASE db lint --local --schema public --fail-on warning
-      - run: $SUPABASE test db --local
+      - run: $SUPABASE db lint --schema public --fail-on warning
+      - run: $SUPABASE test db
       - if: always()
         run: $SUPABASE stop --no-backup
