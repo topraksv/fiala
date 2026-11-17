@@ -613,16 +613,25 @@ const RETRIED = "retried:";
  * A refusal is final only for the engine that met it: 1.4.0 sends at the
  * server's generation the rows 1.3 set aside, and those waited on the owner's
  * phone until a sign-out wiped them. A new version sends
- * what waits aside once more, before its first push; a row it refuses too
- * waits until the next version, not the next sync.
+ * what waits aside once more, after its first pull: the requeue stamps the
+ * row as edited now, so before the pull it would overwrite what another device
+ * wrote since. A row it refuses too waits until the next version, not the next
+ * sync.
  */
-async function retryAsideAfterUpdate(): Promise<void> {
+const retriedKey = (): string => RETRIED + (Constants.expoConfig?.version ?? "");
+
+/** What waited aside before this version first pushed, so its own refusals are not sent twice; null once it has had its look. */
+async function asideBeforeUpdate(): Promise<{ id: number }[] | null> {
   const sqlite = await getSqliteAsync();
-  const key = RETRIED + (Constants.expoConfig?.version ?? "");
-  if (await sqlite.getFirstAsync("SELECT 1 FROM sync_state WHERE table_name = ?", [key])) return;
-  for (const { id } of await sqlite.getAllAsync<{ id: number }>("SELECT id FROM sync_dead_letters")) await retryDeadLetter(id);
+  if (await sqlite.getFirstAsync("SELECT 1 FROM sync_state WHERE table_name = ?", [retriedKey()])) return null;
+  return sqlite.getAllAsync<{ id: number }>("SELECT id FROM sync_dead_letters");
+}
+
+async function retryAside(aside: { id: number }[]): Promise<void> {
+  const sqlite = await getSqliteAsync();
+  for (const { id } of aside) await retryDeadLetter(id);
   await sqlite.runAsync("DELETE FROM sync_state WHERE table_name LIKE ?", [`${RETRIED}%`]);
-  await sqlite.runAsync("INSERT INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [key, nowIso()]);
+  await sqlite.runAsync("INSERT INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [retriedKey(), nowIso()]);
 }
 
 async function deadLetterCount(): Promise<number> {
@@ -645,9 +654,14 @@ async function runSync(userId: string, token: SessionEpochToken, allowRefresh: b
   status.set({ state: "syncing" });
   try {
     await assertSessionIs(supabase, userId);
-    await retryAsideAfterUpdate();
+    const aside = await asideBeforeUpdate();
     await pushOutbox(supabase, userId, token);
     await pullAll(supabase, userId, token);
+    if (aside) {
+      await retryAside(aside);
+      // Only what was requeued: a write made during this pass waits for the rerun it asked for.
+      if (aside.length > 0) await pushOutbox(supabase, userId, token);
+    }
     await followMemberships(supabase, userId, token);
     assertActive(token);
     await settlePulledDoses(userId);

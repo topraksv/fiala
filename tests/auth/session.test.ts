@@ -745,6 +745,9 @@ describe("deleting the account", () => {
     device.dropped.clear();
     expect(await session().signIn(B.email, B.password)).toBe(tr.auth.errOtherAccountPending);
     expect(session().userId).toBeNull();
+    expect(await session().signIn(B.email, B.password, { takeOver: true }), "the person holding the device gave A's unsent rows up").toBeNull();
+    expect(rows()).toBe(0);
+    expect(device.stored.get(OWNER)).toBe(B.id);
   });
 });
 

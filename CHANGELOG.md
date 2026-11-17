@@ -8,6 +8,13 @@ Notlar kısa tutulur: ne değişti, tek cümle. Sebebi ve ölçümü commit'te.
 `scripts/release-notes.mjs` bir bölümü etiketinin GitHub sürüm notuna çevirir;
 bölümü olmayan sürüm yayımlanamaz.
 
+## 0.2.3
+
+### Patch Changes
+
+- Bu cihazda başka bir hesabın gönderilmemiş kayıtları dururken yeni hesapla giriş yapılınca artık ne silineceği söylenip soruluyor; onaylanırsa giriş yapılıyor. Eskiden o hesap geri gelemiyorsa cihaz kilitli kalıyordu.
+- Güncellemeden sonra bekleyen kayıtlar yeniden gönderilirken, o sırada başka cihazda yapılmış daha yeni değişikliğin üstüne artık yazılmıyor.
+
 ## 0.2.2
 
 ### Patch Changes

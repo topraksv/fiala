@@ -546,6 +546,28 @@ describe("what the server will not take", () => {
       expect(await readDeadLetters()).toMatchObject([{ reason: "refused" }]);
     });
   });
+
+  it("does not let that retry overwrite what another device wrote since the row was set aside", async () => {
+    const id = await on("A", async () => {
+      await put("greeting", "merhaba");
+      await sync();
+      return idOf("greeting");
+    });
+    await on("B", async () => {
+      await sync();
+      await put("greeting", "selam");
+      await sync();
+    });
+    await on("A", async () => {
+      devices.A.prepare(
+        "INSERT INTO sync_dead_letters (outbox_id, table_name, row_id, payload, reason, quarantined_at) VALUES (1, 'settings', ?, '{}', 'refused', '2026-09-30T14:27:31.000Z')",
+      ).run(id);
+      harness.version = "1.4.3";
+      await sync();
+      expect(await readDeadLetters()).toEqual([]);
+      expect(await valueOf("greeting"), "pulled before it was requeued").toBe("selam");
+    });
+  });
 });
 
 describe("the session", () => {

@@ -98,7 +98,7 @@ async function recordThisDevice(at: string, previous: string | null): Promise<vo
  * is the answer that skips a wipe, and on the web `kv` drops a write the
  * browser refuses, so only reading the marker back proves it landed.
  */
-async function ensureWorkspaceFor(userId: string): Promise<string | null> {
+async function ensureWorkspaceFor(userId: string, takeOver = false): Promise<string | null> {
   let owner: string | null;
   try {
     owner = await kv.get(OWNER_KEY);
@@ -108,9 +108,11 @@ async function ensureWorkspaceFor(userId: string): Promise<string | null> {
   if (owner === userId) return null;
   if (owner) {
     try {
-      // Another account's rows may exist nowhere else yet. The one exception
-      // is a deleted account's: nobody is left to send them to.
-      if (owner !== WIPE_PENDING && (await unsentCount()) > 0) return tr.auth.errOtherAccountPending;
+      // Another account's rows may exist nowhere else yet. The exceptions are
+      // a deleted account's, since nobody is left to send them to, and a
+      // takeover the person holding the device confirmed, told what it costs:
+      // an account that cannot come back would hold the device for good.
+      if (!takeOver && owner !== WIPE_PENDING && (await unsentCount()) > 0) return tr.auth.errOtherAccountPending;
       await cancelReminders().catch(ignore);
       await forgetReminderPreferences().catch(ignore);
       await forgetGuide().catch(ignore);
@@ -132,8 +134,8 @@ async function ensureWorkspaceFor(userId: string): Promise<string | null> {
  * who to reopen offline, a date to show — and a store that refuses it costs
  * the convenience, never the session.
  */
-async function claim(supabase: SupabaseClient, user: { id: string; email?: string }, email: string): Promise<string | null> {
-  const refused = await ensureWorkspaceFor(user.id);
+async function claim(supabase: SupabaseClient, user: { id: string; email?: string }, email: string, takeOver = false): Promise<string | null> {
+  const refused = await ensureWorkspaceFor(user.id, takeOver);
   if (refused) {
     await endAuthSession(supabase, "local");
     return refused;
@@ -203,7 +205,8 @@ interface SessionStore {
    */
   operation: AccountOperation | null;
   bootstrap: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<string | null>;
+  /** Refuses with `tr.auth.errOtherAccountPending` while another account's changes are unsent here, unless `takeOver`. */
+  signIn: (email: string, password: string, options?: { takeOver?: boolean }) => Promise<string | null>;
   signUp: (email: string, password: string) => Promise<SignUpResult>;
   /** The code the confirmation e-mail carries, which opens the new account here. */
   confirmSignUp: (email: string, code: string) => Promise<string | null>;
@@ -332,13 +335,13 @@ export const useSession = create<SessionStore>((set, get) => ({
       opening = null;
     })),
 
-  signIn: (email, password) =>
+  signIn: (email, password, options) =>
     running("sign-in", async () => {
       const supabase = getSupabase();
       if (!supabase) return tr.auth.errNotConfigured;
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return friendlyAuthError(error.message);
-      const refused = await claim(supabase, data.user, email);
+      const refused = await claim(supabase, data.user, email, options?.takeOver);
       if (refused) return refused;
       const at = data.user.last_sign_in_at ?? new Date().toISOString();
       const previousLoginAt = await recordSuccessfulLogin(kv, data.user.id, at).catch(absent);

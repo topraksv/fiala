@@ -12,6 +12,7 @@ import { isEmail } from "../../domain/names";
 import { tr } from "../../i18n/tr";
 import { heldInvite } from "../../sync/sharing";
 import { Body, Button, Card, CODE_FIELD, CODE_LENGTH, EMAIL_FIELD, Notice, Screen, TextField } from "../../ui/components";
+import { appConfirm } from "../../ui/dialog";
 import { interactionSurface } from "../../ui/interaction";
 import { Press } from "../../ui/press";
 import { LegalConsentControl, LegalNoticeSheet } from "../../ui/legal-notice";
@@ -170,7 +171,9 @@ async function attempt(mode: Mode, email: string, password: string, code: string
   const { signIn, signUp, requestPasswordReset, confirmSignUp, resetPassword, resendSignUpCode } = useSession.getState();
   const failed = (text: string | null) => ({ outcome: text ? { tone: "error" as const, text } : null });
   if (mode === "signIn") {
-    const error = await signIn(email, password);
+    let error = await signIn(email, password);
+    // Whoever holds the device may give up what its last account never sent, once told what goes.
+    if (error === tr.auth.errOtherAccountPending && (await appConfirm(tr.auth.takeOverTitle, tr.auth.takeOverBody, tr.auth.takeOverConfirm))) error = await signIn(email, password, { takeOver: true });
     if (error !== tr.auth.errEmailNotConfirmed) return failed(error);
     // An account never confirmed is one code away, not a dead end. A resend
     // refused for coming too soon leaves the code already mailed to type.

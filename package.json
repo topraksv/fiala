@@ -1,6 +1,6 @@
 {
   "name": "fiala",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "main": "expo-router/entry",
   "license": "UNLICENSED",
   "private": true,

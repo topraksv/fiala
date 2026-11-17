@@ -958,7 +958,10 @@ export const tr = {
     errNotConfigured: "Hesaplar bu sürümde kapalı; verilerin yalnızca bu cihazda.",
     errWorkspaceOwner: "Bu cihazdaki verilerin kime ait olduğu kaydedilemedi. Uygulamayı kapatıp açmayı dene.",
     errWorkspaceReset: "Bu cihazdaki veriler temizlenemedi. Uygulamayı kapatıp açmayı dene.",
-    errOtherAccountPending: "Bu cihazda başka bir hesabın henüz gönderilemeyen değişiklikleri var. Önce o hesapla girip eşitlenmesini bekle, sonra çıkış yap.",
+    errOtherAccountPending: "Bu cihazda başka bir hesabın henüz gönderilemeyen değişiklikleri var. Önce o hesapla girip eşitlenmesini bekle, sonra çıkış yap; ya da Giriş Yap ekranında o değişiklikleri silmeyi seç.",
+    takeOverTitle: "Önceki hesabın kayıtları silinsin mi?",
+    takeOverBody: "Bu cihazda başka bir hesabın buluta gönderilememiş kayıtları var. Devam edersen o kayıtlar, fotoğraflar ve belgeler kalıcı olarak silinir. O hesabın bulutta duran kayıtlarına bir şey olmaz.",
+    takeOverConfirm: "Sil ve Giriş Yap",
     /** Said only once a send has been tried: what it names exists nowhere else. */
     signOutPending: "Bazı değişikliklerin henüz gönderilemedi. Şimdi çıkış yaparsan bu cihazdan silinirler ve geri getirilemezler.",
   },
