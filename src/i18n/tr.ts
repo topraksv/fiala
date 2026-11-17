@@ -12,6 +12,14 @@ function dateTimeLabel(iso: string): string {
   return Number.isNaN(value.getTime()) ? iso : DATE_TIME.format(value);
 }
 
+/** "14:05" on the device's clock, for a row under its day's heading. */
+const TIME = new Intl.DateTimeFormat("tr-TR", { timeStyle: "short" });
+
+function timeLabel(iso: string): string {
+  const value = new Date(iso);
+  return Number.isNaN(value.getTime()) ? iso : TIME.format(value);
+}
+
 export const tr = {
   /** The browser tab, the search result and a shared link's headline: what the app is for, not its name alone. */
   meta: { title: "Fiala", social: "Evdeki ilaçlar, son kullanma tarihleri ve stok tek dolapta." },
@@ -407,6 +415,40 @@ export const tr = {
     text: (name: string, sections: readonly [string, string][]) =>
       [`${name} — Acil durum kartı`, ...sections.map(([title, body]) => `${title}:\n${body}`), "Fiala ile hazırlandı; kişinin kendi girdiği bilgidir."].join("\n\n"),
   },
+  /** What happened to every box, and the reports made of it (F4.1, F4.2). */
+  history: {
+    title: "Geçmiş ve Raporlar",
+    hint: "Eklenen, biten, elden çıkan; eczacı listesi",
+    viewBy: "Gösterilen",
+    views: { history: "Geçmiş", reports: "Raporlar" },
+    kindBy: "Ne oldu",
+    allKinds: "Tümü",
+    kinds: { use: "Kullanım", added: "Eklenen", edit: "Düzenleme", left: "Biten ve çıkan" },
+    spanBy: "Tarih",
+    span: (days: number | null) => (days == null ? "Tümü" : days === 365 ? "Son 1 yıl" : `Son ${days} gün`),
+    filters: { product: "İlaç", person: "Kişi", place: "Yer" },
+    everything: "Tümü",
+    filterChosen: (filter: string, chosen: string) => `${filter}: ${chosen}`,
+    today: "Bugün",
+    yesterday: "Dün",
+    time: timeLabel,
+    noMatch: "Bu seçime uyan bir kayıt yok.",
+    emptyTitle: "Henüz geçmiş yok",
+    emptyHint: "Kutu eklediğinde, kullandığında ya da dolaptan çıkardığında burada görünür.",
+    tiles: { soon: "SKT'si yaklaşan kutu", expired: "SKT'si geçen kutu", missing: "Eksik bilgi", left: "Son 1 yılda çıkan kutu" },
+    leftDetail: (finished: number, disposed: number, lost: number) => `${finished}\u00a0biten · ${disposed}\u00a0elden çıkan · ${lost}\u00a0kayıp`,
+    missingSection: "Bilgisi eksik",
+    noSubstance: "Etken madde girilmedi",
+    doctorSection: "Doktor ve eczacı listesi",
+    doctorHint: "Doktora ya da eczacıya göstermek istediğin ilaçları seç.",
+    share: (count: number) => `${count}\u00a0İlacı Paylaş`,
+    shareCaption: "Paylaşılan: her ilacın adı, gücü, etken maddesi, kalan miktarı ve doz planı. Kişi adı ve not gitmez.",
+    copied: "Liste panoya kopyalandı.",
+    remaining: (text: string) => `Kalan ${text}`,
+    medicine: (name: string, substance: string | null, remaining: string | null, plans: readonly string[]) =>
+      [name, `Etken madde: ${substance ?? tr.box.unknown}`, `Kalan: ${remaining ?? tr.box.unknown}`, `Doz planı: ${plans.length > 0 ? plans.join("; ") : tr.box.unknown}`].join("\n"),
+    text: (day: string, medicines: readonly string[]) => [`Fiala — ilaç listem (${day})`, ...medicines, "Fiala ile hazırlandı; kişinin kendi girdiği bilgidir."].join("\n\n"),
+  },
   photos: {
     title: "Fotoğraf",
     add: "Fotoğraf ekle",
@@ -495,6 +537,10 @@ export const tr = {
     movedPrivate: "Belge özel yapıldı",
     movedTo: (household: string) => `Belge ${household} hanesine taşındı`,
     onlyAdder: "Bu belgeyi yalnız onu ekleyen özel yapabilir ya da başka yere taşıyabilir.",
+    chosenReaders: "Seçili Kişiler",
+    chosenHint: "Belgeyi kimler görsün? Dokunduğun kişi dosyasıyla birlikte görür; sen her zaman görürsün.",
+    readersChanged: "Belgeyi görenler değişti",
+    shownTo: (names: string) => (names ? `Bu belgeyi ekleyen, onu yalnız şu kişilere gösteriyor: ${names}.` : "Bu belgeyi ekleyen, onu yalnız kendine ayırdı."),
     linked: "Belgeli",
   },
   /** Dose plans, their answers and the calendar (F3.7–F3.10). */
@@ -578,6 +624,8 @@ export const tr = {
   },
   catalogue: {
     search: "İlaç Listesinde Ara",
+    /** On Durum's tile, beside two-word neighbours. */
+    searchShort: "İlaç Ara",
     searching: "Aranıyor…",
     found: (count: number) => `${count} ilaç bulundu`,
     none: "Listede bulunamadı. Adını ve bilgilerini aşağıya yazabilirsin.",
@@ -1191,7 +1239,7 @@ export const tr = {
     setAside: dateTimeLabel,
     reasons: { refused: "sunucu kabul etmedi", invalid_row: "geçersiz veri", malformed_payload: "bozuk veri" },
     // A dead letter can name a table a newer build added; `record` is its fallback.
-    tables: { settings: "Ayar" } as Record<string, string>,
+    tables: { settings: "Ayar", photos: "Fotoğraf", document_files: "Belge dosyası" } as Record<string, string>,
     record: "Kayıt",
   },
   /** The waiting page, one per account operation, each named. */
@@ -1292,14 +1340,22 @@ export const tr = {
     inventoryEmpty: "Evde dışa aktarılacak kutu yok.",
     backupSection: "Yedek",
     backup: "Yedek Al",
-    backupHint: "Kendi dolabın ve kurduğun haneler tek bir JSON dosyasında. Belgelerin ve fotoğrafların dosyaları hesabında kalır; yedek onları adıyla anar.",
+    backupHint: "Kendi dolabın ve kurduğun haneler, fotoğrafları ve belgelerinin dosyalarıyla birlikte tek bir ZIP dosyasında. Belgeler buluttan indirildiği için internet gerekir.",
+    backupMissing: (count: number) => `${count} dosya ne bu cihazda ne bulutta bulunabildiği için yedeğe girmedi. İnternete bağlıyken yeniden yedek alabilirsin.`,
     restore: "Yedekten Geri Yükle",
     restoreHint: "Yedekteki kayıt yalnız bu cihazdakinden yeniyse yazılır; ayarlar ve izinler geri yüklenmez.",
     restoreTitle: "Yedek geri yüklensin mi?",
     restoreBody: (day: string) => `${day} tarihli yedekteki kayıtlar, bu cihazda daha yenisi olmayanların yerine yazılır ve hesabının diğer cihazlarına da gider.`,
     restoreConfirm: "Geri Yükle",
-    restored: (written: number, kept: number, closed: number) =>
-      [`${written} kayıt geri yüklendi.`, kept ? `${kept} kayıt cihazda daha yeni olduğu için korundu.` : "", closed ? `${closed} kayıt artık yazamadığın bir haneye ait olduğu için atlandı.` : ""].filter(Boolean).join(" "),
+    restored: (written: number, kept: number, closed: number, files: number, skipped: number, damaged = false) =>
+      [
+        `${written} kayıt geri yüklendi.`,
+        files ? `${files} fotoğraf ve belge dosyası geri yüklendi.` : "",
+        kept ? `${kept} kayıt cihazda daha yeni olduğu için korundu.` : "",
+        closed ? `${closed} kayıt artık yazamadığın bir haneye ait olduğu için atlandı.` : "",
+        skipped ? `${skipped} dosya bağlı olduğu kayıt geri yüklenmediği, cihazda zaten olduğu ya da okunamadığı için atlandı.` : "",
+        damaged ? "Yedek dosyasının sonu okunamadı; ondan sonraki fotoğraf ve belgeler gelmedi. Dosyayı yeniden seçersen kalanlar da eklenir." : "",
+      ].filter(Boolean).join(" "),
     importOther: "Başka Uygulamadan İçe Aktar",
     importOtherHint: "CSV ya da JSON dosyasındaki kutuları dolabına ekle.",
     documentsSection: "Belgelere kim erişir",
@@ -1330,6 +1386,7 @@ export const tr = {
       shape: "alanları Fiala'nın yazabileceği biçimde değil",
       duplicate: "aynı kimlik dosyada iki kez geçiyor",
       link: "bağlı olduğu kayıt ne dosyada ne bu cihazda var",
+      archive: "Fiala'nın yazdığı bir yedek arşivi değil ya da dosya bozuk",
     },
     tables: {
       cabinets: "Haneler",

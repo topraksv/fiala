@@ -7,7 +7,13 @@
 import type { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const harness = vi.hoisted(() => ({ db: null as DatabaseSync | null }));
+const harness = vi.hoisted(() => ({
+  db: null as DatabaseSync | null,
+  /** Storage's files, by path (`exists` also by bucket and path); `download` answers 404 for any other. */
+  stored: new Map<string, Uint8Array>(),
+  /** Storage failing the question, as a network does. */
+  unreachable: false,
+}));
 
 vi.mock("../../src/db/client", async () => {
   const { sqliteClientMock } = await import("../helpers");
@@ -15,9 +21,27 @@ vi.mock("../../src/db/client", async () => {
 });
 
 vi.mock("expo-crypto", async () => (await import("../helpers")).expoCryptoMock);
+vi.mock("../../src/sync/supabase", () => ({
+  getSupabase: () => ({
+    storage: {
+      from: (bucket: string) => ({
+        exists: async (path: string) => {
+          if (harness.unreachable) throw new Error("offline");
+          return { data: harness.stored.has(`${bucket}/${path}`) || harness.stored.has(path), error: null };
+        },
+        download: async (path: string) => {
+          const bytes = harness.stored.get(path);
+          return bytes ? { data: new Blob([bytes as BlobPart]), error: null } : { data: null, error: { status: 404, message: "Object not found" } };
+        },
+      }),
+    },
+  }),
+}));
 vi.mock("react-native", () => ({ Platform: { OS: "web" } }));
 
-const { buildBackupText, inventoryGrid, movedTo, readBackup, restoreBackup, workbookBytes } = await import("../../src/services/export-import");
+const { buildBackupText, inventoryGrid, movedTo, readBackup, restoreArchive, restoreBackup, workbookBytes, writeBackupArchive } = await import("../../src/services/export-import");
+const { setPhoto } = await import("../../src/data/cabinet");
+const { zipSync, strToU8 } = await import("fflate");
 const { addPackage, readCabinet, tagProduct } = await import("../../src/data/cabinet");
 const { addDocument } = await import("../../src/data/documents");
 const { deterministicId, naturalKeys } = await import("../../src/db/ids");
@@ -49,6 +73,7 @@ const count = (table: string, where = "1") => (harness.db!.prepare(`SELECT COUNT
 beforeEach(() => {
   harness.db = migratedDatabase();
   households(harness.db);
+  harness.stored.clear();
 });
 
 describe("a backup", () => {
@@ -162,6 +187,250 @@ describe("a backup", () => {
     expect(tables.product_tags?.[0]).toMatchObject({ id: "01900000-0000-7000-8000-0000000000d2", product_id: product.id });
     const moved = { ...product, id: await deterministicId(naturalKeys.product(OTHER, GTIN)), cabinet_id: HOME };
     expect((await movedTo({ ...backup, account: OTHER, tables: { products: [moved] } }, ME)).products?.[0], "a household's product keeps its id, whatever it was made of").toEqual(moved);
+  });
+});
+
+describe("a backup with its files", () => {
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x01, 0x02]).toString("base64");
+  const PHOTO = { data: `data:image/jpeg;base64,${JPEG}`, thumb: `data:image/jpeg;base64,${JPEG}AA==` };
+  const FIELDS = { kind: "prescription", title: "Reçete", personId: null, issuedOn: null, note: null, reference: null } as const;
+  const yes = async () => true;
+
+  async function archive(me: string) {
+    const parts: Uint8Array[] = [];
+    const { missing } = await writeBackupArchive(me, async (chunk) => void parts.push(chunk));
+    return { bytes: new Uint8Array(Buffer.concat(parts)), missing, chunks: parts.length };
+  }
+  /** Read back in small pieces, as a phone reads a large file. */
+  const reader = (bytes: Uint8Array, size = 7) => {
+    let at = 0;
+    return async () => (at >= bytes.length ? null : bytes.subarray(at, (at += size)));
+  };
+  const files = () => [
+    ...harness.db!.prepare("SELECT 'photo' AS kind, id, uploaded_at FROM photos").all(),
+    ...harness.db!.prepare("SELECT 'document' AS kind, id, uploaded_at FROM document_files").all(),
+  ];
+
+  async function withFiles(cabinet: string) {
+    const box = await addPackage(cabinet, { name: "Parol" }, { unit: "tablet" }, 20_000);
+    await setPhoto("packages", box, PHOTO);
+    const document = await addDocument(cabinet, FIELDS, { base64: PDF, type: "pdf" });
+    const photoId = (harness.db!.prepare("SELECT photo_id FROM packages").get() as { photo_id: string }).photo_id;
+    const fileId = (harness.db!.prepare("SELECT file_id FROM documents").get() as { file_id: string }).file_id;
+    return { document, photoId, fileId };
+  }
+
+  it("carries each photo and document file, an entry at a time, and a fresh device takes them back to send", async () => {
+    const { photoId, fileId } = await withFiles(ME);
+    const { bytes, missing, chunks } = await archive(ME);
+    expect(missing).toBe(0);
+    expect(chunks, "handed on as each entry is added, not held whole").toBeGreaterThan(3);
+    harness.db = migratedDatabase();
+    households(harness.db);
+
+    const done = await restoreArchive(ME, reader(bytes), yes, online);
+
+    expect(done, "the household's own row is as new here").toEqual({ restored: 5, kept: 1, closed: 0, files: 2, skipped: 0, damaged: false });
+    expect(files()).toEqual([{ kind: "photo", id: photoId, uploaded_at: null }, { kind: "document", id: fileId, uploaded_at: null }]);
+    expect(harness.db.prepare("SELECT data FROM photos").get(), "as the device keeps a photo").toEqual({ data: PHOTO.data });
+    expect(harness.db.prepare("SELECT data FROM document_files").get()).toEqual({ data: PDF });
+    expect(await restoreArchive(ME, reader(bytes), yes, online), "a file the device holds is not written twice").toMatchObject({ files: 0, skipped: 2 });
+  });
+
+  it("fetches a document's file the device does not hold, keeps none of it, and counts one it cannot get", async () => {
+    const { fileId } = await withFiles(ME);
+    harness.db!.exec("DELETE FROM document_files");
+    harness.stored.set(`${fileId}/file.pdf`, Buffer.from(PDF, "base64"));
+    expect((await archive(ME)).missing).toBe(0);
+    expect(count("document_files"), "a backup leaves the device as it found it").toBe(0);
+    harness.stored.clear();
+    harness.db!.exec("DELETE FROM photos");
+    expect((await archive(ME)).missing, "neither here nor in Storage: said, never left out unsaid").toBe(2);
+  });
+
+  it("gives another account's files ids of this one's, the same for each row and its entry", async () => {
+    harness.db = migratedDatabase();
+    harness.db.exec(`INSERT INTO cabinets (id, created_at, updated_at, owner_id, name) VALUES ('${OTHER}', 'x', 'x', '${OTHER}', '')`);
+    const { photoId, fileId } = await withFiles(OTHER);
+    const { bytes } = await archive(OTHER);
+    harness.db = migratedDatabase();
+
+    expect(await restoreArchive(ME, reader(bytes), yes, online)).toMatchObject({ files: 2, skipped: 0 });
+
+    const photo = await deterministicId(`backup-file:${ME}:${photoId}`);
+    const file = await deterministicId(`backup-file:${ME}:${fileId}`);
+    expect(harness.db.prepare("SELECT photo_id FROM packages").get()).toEqual({ photo_id: photo });
+    expect(harness.db.prepare("SELECT file_id FROM documents").get()).toEqual({ file_id: file });
+    expect(files().map((each) => each.id)).toEqual([photo, file]);
+  });
+
+  it("writes no file a restored row does not name, nor one whose bytes are not what its name says", async () => {
+    const { fileId } = await withFiles(ME);
+    const text = await buildBackupText(ME);
+    harness.db = migratedDatabase();
+    households(harness.db);
+    const jpeg = Buffer.from(JPEG, "base64");
+    const forged = zipSync({
+      "backup.json": strToU8(text),
+      "photos/01900000-0000-7000-8000-0000000000f9/full.jpg": jpeg,
+      "photos/01900000-0000-7000-8000-0000000000f9/thumb.jpg": jpeg,
+      [`documents/${fileId}.pdf`]: jpeg,
+      "notes.txt": strToU8("?"),
+      "photos/01900000-0000-7000-8000-0000000000f8/full.jpg": jpeg,
+    }, { level: 0 });
+
+    expect(await restoreArchive(ME, reader(forged, 64), yes, online), "a full size no thumbnail followed counts too").toMatchObject({ files: 0, skipped: 4 });
+    expect(files()).toEqual([]);
+  });
+
+  it("writes nothing when the person declines", async () => {
+    await withFiles(ME);
+    const { bytes } = await archive(ME);
+    harness.db = migratedDatabase();
+    expect(await restoreArchive(ME, reader(bytes), async () => false, online)).toBeNull();
+    expect(count("packages") + count("photos") + count("outbox")).toBe(0);
+  });
+
+  it("refuses an archive that does not start with its backup, a file that is no zip, and an entry past its bound", async () => {
+    await expect(restoreArchive(ME, reader(zipSync({ "notes.txt": strToU8("?") }, { level: 0 })), yes, online)).rejects.toThrow("yedek arşivi değil");
+    await expect(restoreArchive(ME, reader(strToU8("PK not a zip at all, only its first letters")), yes, online)).rejects.toThrow("yedek arşivi değil");
+    await expect(restoreArchive(ME, reader(new Uint8Array()), yes, online)).rejects.toThrow("yedek arşivi değil");
+    const deflated = zipSync({ "backup.json": strToU8(await buildBackupText(ME)) }, { level: 6 });
+    await expect(restoreArchive(ME, reader(deflated), yes, online), "squeezed by another tool").rejects.toThrow("yedek arşivi değil");
+    const oversized = zipSync({ "backup.json": new Uint8Array(15 * 1024 * 1024 + 1) }, { level: 0 });
+    await expect(restoreArchive(ME, reader(oversized, 1024 * 1024), yes, online)).rejects.toThrow("15 MB");
+  });
+
+  it("passes over an entry past its bound unheld, and keeps reading", async () => {
+    const { photoId } = await withFiles(ME);
+    const text = await buildBackupText(ME);
+    harness.db = migratedDatabase();
+    households(harness.db);
+    const jpeg = Buffer.from(JPEG, "base64");
+    const huge = zipSync({
+      "backup.json": strToU8(text),
+      "photos/01900000-0000-7000-8000-0000000000f9/full.jpg": new Uint8Array(4 * 1024 * 1024 + 1),
+      [`photos/${photoId}/full.jpg`]: jpeg,
+      [`photos/${photoId}/thumb.jpg`]: jpeg,
+    }, { level: 0 });
+
+    expect(await restoreArchive(ME, reader(huge, 1024 * 1024), yes, online)).toMatchObject({ files: 1, skipped: 1, damaged: false });
+  });
+
+  /** A JPEG or a PDF may hold a zip signature anywhere; a reader that searched for its end cut the file there. */
+  it("brings back a file holding zip signatures byte for byte, its CRC as zip tools check it", async () => {
+    const { photoId } = await withFiles(ME);
+    const full = new Uint8Array(70_000).map((_, at) => (at * 31) & 0xff);
+    full.set([0xff, 0xd8, 0xff], 0);
+    full.set([0x50, 0x4b, 0x03, 0x04], 500);
+    full.set([0x50, 0x4b, 0x07, 0x08], 20_000);
+    full.set([0x50, 0x4b, 0x01, 0x02], 65_000);
+    harness.db!.prepare("UPDATE photos SET data = ? WHERE id = ?").run(`data:image/jpeg;base64,${Buffer.from(full).toString("base64")}`, photoId);
+    const { bytes } = await archive(ME);
+    const { unzipSync } = await import("fflate");
+    const { crc32: zlibCrc } = await import("node:zlib");
+    const listed = unzipSync(bytes);
+    expect(Object.keys(listed), "the central directory names each entry").toHaveLength(4);
+    expect(Buffer.from(listed[`photos/${photoId}/full.jpg`]!).equals(Buffer.from(full))).toBe(true);
+    const view = new DataView(bytes.buffer, bytes.byteOffset);
+    expect(view.getUint32(14, true), "backup.json's CRC").toBe(zlibCrc(listed["backup.json"]!));
+    harness.db = migratedDatabase();
+    households(harness.db);
+
+    expect(await restoreArchive(ME, reader(bytes, 4096), yes, online)).toMatchObject({ files: 2, skipped: 0, damaged: false });
+    const kept = harness.db.prepare("SELECT data FROM photos").get() as { data: string };
+    expect(kept.data).toBe(`data:image/jpeg;base64,${Buffer.from(full).toString("base64")}`);
+  });
+
+  it("keeps a file at its bound exactly, and passes over a document past its own", async () => {
+    const { photoId, fileId } = await withFiles(ME);
+    const text = await buildBackupText(ME);
+    harness.db = migratedDatabase();
+    households(harness.db);
+    const full = new Uint8Array(4 * 1024 * 1024);
+    full.set([0xff, 0xd8, 0xff]);
+    const document = new Uint8Array(10 * 1024 * 1024 + 1);
+    document.set(Buffer.from(PDF, "base64"));
+    const atBounds = zipSync({
+      "backup.json": strToU8(text),
+      [`photos/${photoId}/full.jpg`]: full,
+      [`photos/${photoId}/thumb.jpg`]: full,
+      [`documents/${fileId}.pdf`]: document,
+    }, { level: 0 });
+
+    expect(await restoreArchive(ME, reader(atBounds, 1024 * 1024), yes, online)).toMatchObject({ files: 1, skipped: 1 });
+  });
+
+  it("says an archive missed an entry when one header is broken", async () => {
+    await withFiles(ME);
+    const { bytes } = await archive(ME);
+    harness.db = migratedDatabase();
+    households(harness.db);
+    const broken = bytes.slice();
+    const second = 30 + "backup.json".length + new DataView(bytes.buffer, bytes.byteOffset).getUint32(18, true);
+    broken.set([0x50, 0x4b, 0x09, 0x09], second);
+
+    expect(await restoreArchive(ME, reader(broken), yes, online)).toMatchObject({ restored: 5, damaged: true });
+  });
+
+  it("refuses an archive whose entries leave their size to a trailer", async () => {
+    const { Zip, ZipPassThrough } = await import("fflate");
+    const parts: Uint8Array[] = [];
+    const zip = new Zip((_, chunk) => void parts.push(chunk));
+    const entry = new ZipPassThrough("backup.json");
+    zip.add(entry);
+    entry.push(strToU8(await buildBackupText(ME)), true);
+    zip.end();
+    await expect(restoreArchive(ME, reader(new Uint8Array(Buffer.concat(parts))), yes, online)).rejects.toThrow("yedek arşivi değil");
+  });
+
+  it("reports the rows it restored when the archive breaks off after them", async () => {
+    await withFiles(ME);
+    const { bytes } = await archive(ME);
+    harness.db = migratedDatabase();
+    households(harness.db);
+    const end = 30 + "backup.json".length + new DataView(bytes.buffer, bytes.byteOffset).getUint32(18, true);
+    const junk = bytes.slice(0, end + 10);
+    junk.set([0x50, 0x4b, 0x09, 0x09], end);
+
+    expect(await restoreArchive(ME, reader(bytes.slice(0, end + 40)), yes, online), "cut inside a photo").toMatchObject({ restored: 5, files: 0, damaged: true });
+    harness.db = migratedDatabase();
+    households(harness.db);
+    expect(await restoreArchive(ME, reader(bytes.slice(0, end)), yes, online), "cut where an entry ended").toMatchObject({ restored: 5, damaged: true });
+    harness.db = migratedDatabase();
+    households(harness.db);
+    expect(await restoreArchive(ME, reader(junk), yes, online), "followed by what no zip holds").toMatchObject({ restored: 5, damaged: true });
+  });
+
+  it("writes a file Storage already holds for this account as sent, and one it lacks as unsent", async () => {
+    const { photoId, fileId } = await withFiles(ME);
+    const { bytes } = await archive(ME);
+    harness.db = migratedDatabase();
+    households(harness.db);
+    harness.stored.set(`photos/${photoId}/thumb.jpg`, new Uint8Array([1]));
+
+    expect(await restoreArchive(ME, reader(bytes), yes, online)).toMatchObject({ files: 2 });
+    const sent = (table: string) => (harness.db!.prepare(`SELECT uploaded_at FROM ${table}`).get() as { uploaded_at: string | null }).uploaded_at;
+    expect(sent("photos"), "a household member's photo is not this device's to place again").not.toBeNull();
+    expect(sent("document_files"), `documents/${fileId}: not in Storage, so sent from here`).toBeNull();
+  });
+
+  it("sends from here a file Storage could not be asked about, and asks nothing for another account's", async () => {
+    const { photoId } = await withFiles(ME);
+    const { bytes } = await archive(ME);
+    harness.db = migratedDatabase();
+    households(harness.db);
+    harness.stored.set(`photos/${photoId}/thumb.jpg`, new Uint8Array([1]));
+    harness.unreachable = true;
+    await restoreArchive(ME, reader(bytes), yes, online);
+    harness.unreachable = false;
+    expect(count("photos", "uploaded_at IS NULL")).toBe(1);
+
+    harness.db = migratedDatabase();
+    const moved = await deterministicId(`backup-file:${OTHER}:${photoId}`);
+    harness.stored.set(`photos/${moved}/thumb.jpg`, new Uint8Array([1]));
+    await restoreArchive(OTHER, reader(bytes), yes, online);
+    expect(count("photos", "uploaded_at IS NULL"), "a new id is this account's to send, whatever Storage says").toBe(1);
   });
 });
 

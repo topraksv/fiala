@@ -37,7 +37,7 @@ import {
   type RejectedOutboxEvent,
 } from "./merge-policy";
 import { sendPendingDocuments, sweepUnnamedDocuments } from "./documents";
-import { fetchMissingPhotos, PHOTO_TABLES, sendPendingPhotos, sweepUnnamedPhotos } from "./photos";
+import { fetchMissingPhotos, PHOTO_TABLES, rememberRefused, sendPendingPhotos, sweepUnnamedPhotos } from "./photos";
 import { keyColumns, toLocalRow, toServerRow } from "./rows";
 import { SessionEpoch, SessionEpochCancelledError, type SessionEpochToken } from "./session-epoch";
 import { classifyRefreshFailure, completedSyncState, isNetworkFailure, useSyncStatus, type RefreshOutcome } from "./status";
@@ -219,7 +219,7 @@ async function sendRows(
   return { acknowledged, refused };
 }
 
-async function pushTable(supabase: SupabaseClient, table: SyncedTableName, owner: string, token: SessionEpochToken): Promise<void> {
+async function pushTable(supabase: SupabaseClient, table: SyncedTableName, owner: string, ceiling: number, token: SessionEpochToken): Promise<void> {
   const sqlite = await getSqliteAsync();
   // Read with the table's first batch: only a migration writes the mark, and
   // only the pull after this push clears it.
@@ -227,8 +227,8 @@ async function pushTable(supabase: SupabaseClient, table: SyncedTableName, owner
   for (;;) {
     assertActive(token);
     const events = await sqlite.getAllAsync<OutboxEvent>(
-      `SELECT id, payload, row_id FROM outbox WHERE table_name = ? ORDER BY id ASC LIMIT ${PUSH_BATCH}`,
-      [table],
+      `SELECT id, payload, row_id FROM outbox WHERE table_name = ? AND id <= ? ORDER BY id ASC LIMIT ${PUSH_BATCH}`,
+      [table, ceiling],
     );
     if (events.length === 0) return;
     // After the batch is read, not once before the push: a row naming a photo
@@ -293,12 +293,29 @@ async function pushTable(supabase: SupabaseClient, table: SyncedTableName, owner
       await sqlite.runAsync(`DELETE FROM outbox WHERE id IN (${events.map(() => "?").join(", ")})`, events.map((event) => event.id));
     });
     // At the generation the server holds, so the next pass of this loop sends it and it lands.
-    if (addedAgain.length > 0) await writeRows(addedAgain);
+    if (addedAgain.length > 0) {
+      await writeRows(addedAgain);
+      // Their events are new, and this table's next pass must still read them.
+      ceiling = (await sqlite.getFirstAsync<{ id: number }>("SELECT MAX(id) AS id FROM outbox"))!.id;
+    }
   }
 }
 
 async function pushOutbox(supabase: SupabaseClient, userId: string, token: SessionEpochToken): Promise<void> {
-  for (const table of TABLES) await pushTable(supabase, table, userId, token);
+  // A write committed after a parent table was passed would reach the server
+  // before its parent and be refused for it, so the push takes only what was
+  // queued when it began.
+  const ceiling = (await (await getSqliteAsync()).getFirstAsync<{ id: number | null }>("SELECT MAX(id) AS id FROM outbox"))?.id ?? 0;
+  for (const table of TABLES) await pushTable(supabase, table, userId, ceiling, token);
+  // A photo whose row went up without it — passed over, or retried from
+  // "Bekleyen Kayıtlar" — has no outbox event left to carry it. No row waits
+  // on it here, so Storage being down does not stop the pull; the photo stays
+  // unsent and counted until a later run.
+  try {
+    await sendPendingPhotos(supabase, token.signal);
+  } catch (error) {
+    if (error instanceof SessionEpochCancelledError) throw error;
+  }
 }
 
 interface ServerHead {
@@ -653,6 +670,8 @@ async function runSync(userId: string, token: SessionEpochToken, allowRefresh: b
   if (!supabase) return true;
   status.set({ state: "syncing" });
   try {
+    // A relaunch empties the marks of refused files; the row's notice (F7.10) rests on them. Before the network, so offline too.
+    await rememberRefused();
     await assertSessionIs(supabase, userId);
     const aside = await asideBeforeUpdate();
     await pushOutbox(supabase, userId, token);
@@ -739,8 +758,7 @@ export async function flushOutbox(userId: string): Promise<void> {
   try {
     await assertSessionIs(supabase, userId);
     await pushOutbox(supabase, userId, token);
-    // A photo or a file whose row went up without it has no outbox event left to carry it.
-    await sendPendingPhotos(supabase, token.signal);
+    // A file is sent after the push, never inside it.
     await sendPendingDocuments(supabase, token.signal);
   } catch {
     // Counted by the caller.

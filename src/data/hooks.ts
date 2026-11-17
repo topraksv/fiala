@@ -102,8 +102,10 @@ export function useMoves(packageId: string) {
   return useStore(store);
 }
 
-export function useActivity(cabinetId: string) {
-  const store = useMemo(() => liveStore(() => readActivity(cabinetId), ["package_moves", "package_changes", "packages", "products"]), [cabinetId]);
+export function useActivity(cabinetIds: readonly string[], limit?: number) {
+  // Keyed by its text: a caller builds the list anew on every render.
+  const key = cabinetIds.join(",");
+  const store = useMemo(() => liveStore(() => readActivity(key ? key.split(",") : [], limit), ["package_moves", "package_changes", "packages", "products"]), [key, limit]);
   return useStore(store);
 }
 

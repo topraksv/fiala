@@ -50,9 +50,10 @@ const { migrateDb } = await import("../../src/db/migrate");
 const { deterministicId, naturalKeys } = await import("../../src/db/ids");
 const { addPackage, openHousehold, readCabinet, remainingMilli, setPhoto, takeFrom } = await import("../../src/data/cabinet");
 const { readPhoto } = await import("../../src/data/photos");
-const { purgeOwnPhotos, unsentPhotoCount } = await import("../../src/sync/photos");
+const { purgeOwnPhotos, refusedFiles, unsentPhotoCount } = await import("../../src/sync/photos");
 const { addDocument, moveDocument, readDocuments } = await import("../../src/data/documents");
-const { fetchDocumentFile, purgeOwnDocuments, unsentDocumentCount } = await import("../../src/sync/documents");
+const { fetchDocumentFile, purgeOwnDocuments, sweepUnnamedDocuments, unsentDocumentCount } = await import("../../src/sync/documents");
+const nowIsoOf = () => new Date().toISOString();
 const { addDosePlan, answerDose, readDoseAnswers, readDosePlans } = await import("../../src/data/doses");
 const { acceptInvite, answerOffer, cancelInvites, createInvite, offerCabinet, peekInvite, useOffers } = await import("../../src/sync/sharing");
 
@@ -892,7 +893,31 @@ describe("photos", () => {
 
       const before = cloud.requests.length;
       await sync();
-      expect(cloud.requests.slice(before).filter((request) => request.startsWith("upload")), "not offered again this session").toEqual([]);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("upload")), "not offered again").toEqual([]);
+      const [letter] = await readDeadLetters();
+      expect(letter, "waits under Bekleyen Kayıtlar").toMatchObject({ tableName: "photos", rowId: photoId, reason: "refused" });
+      expect(await unsentPhotoCount(), "counted once, as the clue").toBe(0);
+
+      expect(await retryDeadLetter(letter!.id)).toBe("requeued");
+      cloud.failOn.set("upload", { message: "Internal error", status: 503 });
+      expect(await sync(), "no row waits on a retried photo, so Storage being down does not stop the sync").toBe(true);
+      expect(uploaded().uploaded_at).toBeNull();
+      cloud.failOn.delete("upload");
+      await sync();
+      expect(uploaded().uploaded_at, "sent once retried").not.toBeNull();
+      expect(await readDeadLetters()).toEqual([]);
+    });
+  });
+
+  it("marks a refused file's row again after a relaunch, from its clue", async () => {
+    const id = "0190d000-0000-7000-8000-0000000000aa";
+    devices.A.prepare(
+      "INSERT INTO sync_dead_letters (outbox_id, table_name, row_id, payload, reason, quarantined_at) VALUES (-1, 'photos', ?, '{}', 'refused', ?)",
+    ).run(id, new Date().toISOString());
+    expect(refusedFiles.has(id)).toBe(false);
+    await on("A", async () => {
+      await sync();
+      expect(refusedFiles.has(id), "the row says it is on this device alone").toBe(true);
     });
   });
 
@@ -1529,15 +1554,33 @@ describe("documents", () => {
     });
   });
 
-  it("passes over a file Storage refuses for good, and asks no more this launch", async () => {
+  it("passes over a file Storage refuses for good, and asks no more until it is retried", async () => {
     cloud.failOn.set("upload ", { message: "Payload too large", status: 413 });
     const { fileId } = await shared();
     await on("C", async () => {
       const before = cloud.requests.length;
       expect(await sync()).toBe(true);
       expect(cloud.requests.slice(before).filter((request) => request.startsWith("upload"))).toEqual([]);
+      const [letter] = await readDeadLetters();
+      expect(letter, "waits under Bekleyen Kayıtlar, named by its document").toMatchObject({ tableName: "document_files", rowId: fileId, reason: "refused", subject: FIELDS.title });
+      await dismissDeadLetter(letter!.id);
+      expect((await pendingOutboxCount()) + (await unsentDocumentCount()), "given up, nothing waits, so a freeze may go").toBe(0);
+      expect(devices.C.prepare("SELECT 1 AS kept FROM document_files WHERE id = ?").get(fileId), "kept on the device").toEqual({ kept: 1 });
     });
     expect(cloud.documentObjects.has(`${fileId}/file.pdf`)).toBe(false);
+  });
+
+  it("forgets the clue of a refused file no live document names any more", async () => {
+    cloud.failOn.set("upload ", { message: "Payload too large", status: 413 });
+    const { id } = await shared();
+    await on("C", async () => {
+      await sync();
+      expect(await readDeadLetters()).toHaveLength(1);
+      await deleteRows("documents", [id]);
+      await sync();
+      expect(await readDeadLetters(), "nothing left to ask the person about").toEqual([]);
+      expect(await pendingOutboxCount(), "so sign-out does not wait on it").toBe(0);
+    });
   });
 
   it("removes, a month on, the files no live row names, and keeps a named one", async () => {
@@ -1562,6 +1605,21 @@ describe("documents", () => {
     await on("C", () => sync());
     expect(devices.C.prepare("SELECT id FROM document_files").all()).toEqual([{ id: kept }]);
     expect(fileId).not.toBe(kept);
+  });
+
+  it("drops a file the device no longer may read at every sync, and asks Storage once a session", async () => {
+    await on("C", async () => {
+      devices.C.prepare("INSERT INTO document_files (id, data, created_at, uploaded_at) VALUES ('fetched', ?, ?, ?)").run(PDF, nowIsoOf(), nowIsoOf());
+      const rpc = vi.fn(async () => ({ data: [], error: null }));
+      const signal = new AbortController().signal;
+      const client = { rpc } as unknown as Parameters<typeof sweepUnnamedDocuments>[0];
+      await sweepUnnamedDocuments(client, signal);
+      expect(devices.C.prepare("SELECT COUNT(*) AS n FROM document_files").get()).toEqual({ n: 0 });
+      devices.C.prepare("INSERT INTO document_files (id, data, created_at, uploaded_at) VALUES ('revoked', ?, ?, ?)").run(PDF, nowIsoOf(), nowIsoOf());
+      await sweepUnnamedDocuments(client, signal);
+      expect(devices.C.prepare("SELECT COUNT(*) AS n FROM document_files").get(), "a reader left out drops it at the next sync").toEqual({ n: 0 });
+      expect(rpc).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("fails no sync when the sweep cannot list or remove, and sweeps with a later one", async () => {

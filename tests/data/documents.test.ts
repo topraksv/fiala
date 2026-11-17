@@ -17,7 +17,7 @@ vi.mock("../../src/db/client", async () => {
 
 vi.mock("expo-crypto", async () => (await import("../helpers")).expoCryptoMock);
 
-const { addDocument, archiveDocuments, byteSizeOf, deleteDocuments, DOCUMENT_BYTES, editDocument, fileTypeOf, linkDocument, movableBy, moveDocument, readDocumentFile, readDocuments } = await import("../../src/data/documents");
+const { addDocument, archiveDocuments, byteSizeOf, deleteDocuments, DOCUMENT_BYTES, editDocument, fileTypeOf, linkDocument, movableBy, moveDocument, readDocumentFile, readDocuments, readersOf } = await import("../../src/data/documents");
 const { addNamed, addPackage, moveBox, openHousehold } = await import("../../src/data/cabinet");
 const { undoRows } = await import("../../src/db/mutations");
 const { migratedDatabase } = await import("../helpers");
@@ -137,6 +137,21 @@ describe("a document", () => {
     expect(await moveDocument(moved, house), "nothing to move where it is").toBeNull();
     await undoRows(written);
     expect(await readDocuments()).toEqual([expect.objectContaining({ id, cabinetId: "me", title: "Kardiyoloji", fileType: "pdf", packageIds: [box] })]);
+  });
+
+  it("is shown to chosen members as a new row in the same household, each once and in order; the same choice writes nothing", async () => {
+    const house = await openHousehold("me", "Ev");
+    const id = await addDocument(house, FIELDS, { base64: PDF, type: "pdf" });
+    const readers = readersOf(["me", "b", "a", "b"]);
+    expect(readers).toBe("a,b,me");
+    expect(readersOf(null), "none is the whole household").toBeNull();
+    const { id: shown, written } = (await moveDocument(id, house, readers))!;
+    expect(await readDocuments()).toEqual([expect.objectContaining({ id: shown, cabinetId: house, readers: "a,b,me", fileType: "pdf" })]);
+    expect(all(`SELECT readers, deleted_at IS NOT NULL AS gone FROM documents WHERE id = '${id}'`), "the old row keeps its readers, so they learn of its end").toEqual([{ readers: null, gone: 1 }]);
+    expect(await moveDocument(shown, house, "a,b,me"), "nothing to change").toBeNull();
+    await undoRows(written);
+    expect((await readDocuments()).map((document) => [document.id, document.readers])).toEqual([[id, null]]);
+    expect(all(`SELECT file_id, deleted_at IS NOT NULL AS gone FROM documents WHERE id = '${shown}'`), "the undone row goes without its file, so one left out cannot revive it to read it").toEqual([{ file_id: null, gone: 1 }]);
   });
 
   it("follows a box that moves: its link names the box where it went", async () => {

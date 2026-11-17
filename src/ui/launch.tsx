@@ -8,12 +8,12 @@
  */
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Animated, Platform, StyleSheet, type ViewStyle } from "react-native";
+import { Animated, Appearance, Platform, StyleSheet, type ViewStyle } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
 
 import { BrandMark, preloadBrandMark } from "./brand";
 import { useReducedMotion } from "./motion";
-import { brandMark, motion, useTheme } from "./theme";
+import { brandMark, DEFAULT_PALETTE_ID, motion, PALETTES, useTheme } from "./theme";
 
 /**
  * The drawn mark's height: the staff is tall and narrow, so it is sized by
@@ -24,6 +24,13 @@ import { brandMark, motion, useTheme } from "./theme";
  * twice. Expo Go draws it too: it shows no icon there.
  */
 const MARK_HEIGHT = 150;
+
+/**
+ * The native splash's ground (`app.json`): the default palette's, in the
+ * system's scheme, since it is drawn before any setting is read. A browser's
+ * page already reads the stored palette (`src/app/+html.tsx`).
+ */
+const splashGround = () => (Platform.OS === "web" ? null : PALETTES[DEFAULT_PALETTE_ID][Appearance.getColorScheme() === "dark" ? "dark" : "light"].background);
 
 let launched = false;
 const listeners = new Set<() => void>();
@@ -42,6 +49,12 @@ export function Launch({ shown, ready }: { shown: boolean; ready: boolean }) {
   const [drawable, setDrawable] = useState(false);
   const [gone, setGone] = useState(false);
   const [opacity] = useState(() => new Animated.Value(1));
+  // Someone on another palette, or with the scheme forced, starts on a ground
+  // that is not theirs: it turns into theirs as the mark draws, rather than
+  // jumping the moment the splash gives way.
+  const [from] = useState(splashGround);
+  const [ground] = useState(() => new Animated.Value(0));
+  const turns = from != null && from !== palette.background && !reducedMotion;
   const done = ready && (drawn || reducedMotion);
 
   useEffect(() => {
@@ -69,6 +82,14 @@ export function Launch({ shown, ready }: { shown: boolean; ready: boolean }) {
     const timer = setTimeout(() => setDrawn(true), brandMark.launch.draw + brandMark.launch.rest);
     return () => clearTimeout(timer);
   }, [shown, reducedMotion]);
+
+  useEffect(() => {
+    if (!shown || !turns) return;
+    // Colour is not something the native driver animates.
+    const animation = Animated.timing(ground, { toValue: 1, duration: motion.theme, useNativeDriver: false });
+    animation.start();
+    return () => animation.stop();
+  }, [shown, turns, ground]);
 
   useEffect(() => {
     if (!done) return;
@@ -100,7 +121,11 @@ export function Launch({ shown, ready }: { shown: boolean; ready: boolean }) {
       pointerEvents={leaving ? "none" : "auto"}
       style={[
         StyleSheet.absoluteFill,
-        { alignItems: "center", justifyContent: "center", backgroundColor: palette.background },
+        {
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: turns ? ground.interpolate({ inputRange: [0, 1], outputRange: [from, palette.background] }) : palette.background,
+        },
         Platform.OS === "web"
           ? ({
               opacity: leaving ? 0 : 1,

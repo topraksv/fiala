@@ -241,7 +241,9 @@ function revertRows({ writes, before }: RowsWritten, check: () => Promise<unknow
         throw new Error(`Cannot undo: the ${table} row has changed since`);
       }
       const was = before[at];
-      reverts.push({ table, row: was ? fromDbShape(table, was) : { ...current, deletedAt: nowIso() } });
+      // A document this write made goes without its file, as `moveDocument` leaves one: a reader of it left out since could revive it and read the file.
+      const made = table === "documents" ? { ...current, fileId: null, fileType: null, byteSize: null } : current;
+      reverts.push({ table, row: was ? fromDbShape(table, was) : { ...made, deletedAt: nowIso() } });
     }
     return reverts;
   });

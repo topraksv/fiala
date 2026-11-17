@@ -7,6 +7,7 @@ import CalendarX from "lucide-react-native/icons/calendar-x";
 import CalendarClock from "lucide-react-native/icons/calendar-clock";
 import Clock from "lucide-react-native/icons/clock";
 import FileUp from "lucide-react-native/icons/file-up";
+import History from "lucide-react-native/icons/clock-fading";
 import House from "lucide-react-native/icons/house";
 import ListFilter from "lucide-react-native/icons/list-filter";
 import Package from "lucide-react-native/icons/package";
@@ -24,13 +25,14 @@ import SlidersHorizontal from "lucide-react-native/icons/sliders-horizontal";
 import type { CabinetBox, CabinetProduct } from "../../data/cabinet";
 import type { CabinetDosePlan } from "../../data/doses";
 import { useDoseAnswers, useDosePlans, useHouseholds, usePeople, useShownCabinet } from "../../data/hooks";
-import { OPENED_SOON_DAYS, SOON_DAYS, daysUntil, expiryState, formatAmount, formatDay, inView, isEmpty, isLow, lastOpenDay, localDay, type BoxView, type ExpiryState } from "../../domain/boxes";
+import { OPENED_SOON_DAYS, SOON_DAYS, expiryState, formatAmount, formatDay, inView, isEmpty, isLow, lastOpenDay, localDay, type BoxView, type ExpiryState } from "../../domain/boxes";
 import { dosesOfDay, type DayDose } from "../../domain/doses";
 import { tr } from "../../i18n/tr";
 import { canScan } from "../../services/barcode-scan";
 import { Attention } from "../../ui/attention";
 import { openCabinet } from "../../ui/cabinet-link";
-import { Body, Button, Card, EmptyState, IconButton, ListRow, Notice, ReadFailed, Screen, SectionHeader } from "../../ui/components";
+import { ActionTile, Body, Button, Card, CountTile, EmptyState, IconButton, ListRow, Notice, ReadFailed, Screen, SectionHeader, TileGrid } from "../../ui/components";
+import { boxPill } from "../../ui/expiry-pill";
 import { PersonMark } from "../../ui/named-choices";
 import { answerWithUndo } from "../../ui/doses";
 import { useNotices } from "../../ui/notices";
@@ -74,6 +76,34 @@ function TakeNow({ dose, plans }: { dose: DayDose | undefined; plans: readonly C
   const plan = plans.find((each) => each.id === dose?.planId);
   if (dose?.state !== "due" || !plan || !writes(plan.cabinetId)) return null;
   return <Button label={tr.doses.answers.taken} size="sm" onPress={() => void answerWithUndo(dose, "taken", writes)} />;
+}
+
+/** What the cabinet holds, the lists that ask for a look, the way to add a medicine, and three quick starts. */
+function Summary({ products, boxes, counts, onAdd }: { products: number; boxes: number; counts: ReactNode[]; onAdd: () => void }) {
+  const router = useRouter();
+  const { palette } = useTheme();
+  return (
+    <Card>
+      <Body muted>{tr.status.summaryHint}</Body>
+      <Text style={[type.title, { color: palette.text, marginBottom: spacing.md }]}>{tr.status.summary(products, boxes)}</Text>
+      {counts.length > 0 ? (
+        <View style={{ marginBottom: spacing.md }}>
+          <TileGrid wanted={3}>{counts}</TileGrid>
+        </View>
+      ) : null}
+      <View style={{ gap: spacing.sm }}>
+        <Button label={tr.cabinet.add} icon={Plus} onPress={onAdd} />
+        {canScan ? <Button label={tr.addBox.scan} icon={ScanLine} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { scan: "1" } })} /> : null}
+        <TileGrid wanted={3}>
+          {[
+            <ActionTile key="search" icon={Search} label={tr.catalogue.searchShort} onPress={() => router.push({ pathname: "/add-box", params: { search: "1" } })} />,
+            <ActionTile key="dose" icon={CalendarClock} label={tr.doses.quickAdd} onPress={() => router.push("/dose-plan")} />,
+            <ActionTile key="prescription" icon={FileUp} label={tr.doses.uploadPrescription} onPress={() => router.push("/add-document")} />,
+          ]}
+        </TileGrid>
+      </View>
+    </Card>
+  );
 }
 
 /**
@@ -120,22 +150,16 @@ export default function Status() {
   const { by, opened, stock } = sorted(home, today);
   const products = new Set(home.map(({ product }) => product.id)).size;
   const open = (box: CabinetBox) => router.push({ pathname: "/box/[id]", params: { id: box.id } });
-  const left = (day: string) => {
-    const days = daysUntil(day, today);
-    return days < 0 ? tr.status.daysAgo(-days) : tr.status.daysLeft(days);
-  };
-  const printed = (box: CabinetBox) => (box.expiresOn ? tr.common.joined(tr.cabinet.expires(formatDay(box.expiresOn)), left(box.expiresOn)) : tr.cabinet.noExpiry);
-  const openEnd = (box: CabinetBox) => {
-    const day = lastOpenDay(box.openedOn, box.useWithinDays)!;
-    return tr.common.joined(tr.cabinet.openUntil(formatDay(day)), left(day));
-  };
+  // How long it has or had is the pill's; the line says which day.
+  const printed = (box: CabinetBox) => (box.expiresOn ? tr.cabinet.expires(formatDay(box.expiresOn)) : tr.cabinet.noExpiry);
+  const openEnd = (box: CabinetBox) => tr.cabinet.openUntil(formatDay(lastOpenDay(box.openedOn, box.useWithinDays)!));
   const amount = (box: CabinetBox) => (isEmpty(box) ? tr.status.usedUp : tr.cabinet.remaining(formatAmount(box.remainingMilli), tr.units[box.unit]));
   const changed = (box: CabinetBox) => {
     const day = formatDay(localDay(new Date(box.updatedAt)));
     return box.updatedAt === box.createdAt ? tr.status.added(day) : tr.status.edited(day);
   };
 
-  const boxRows = (held: Held[], icon: typeof Clock, tone: "error" | "warning" | null, subtitle: (box: CabinetBox) => string) =>
+  const boxRows = (held: Held[], icon: typeof Clock, tone: "error" | "warning" | null, subtitle: (box: CabinetBox) => string, pilled = true) =>
     held.map(({ product, box }) => (
       <ListRow
         key={box.id}
@@ -143,6 +167,7 @@ export default function Status() {
         iconColor={tone ? palette[tone] : undefined}
         title={tr.common.boxName(product, box)}
         subtitle={subtitle(box)}
+        pill={pilled ? boxPill(box, today) : null}
         chevron
         onPress={() => open(box)}
       />
@@ -158,6 +183,11 @@ export default function Status() {
   const listCard = (title: string, held: Held[], view: BoxView, icon: typeof Clock, tone: "error" | "warning" | null, subtitle: (box: CabinetBox) => string) =>
     card(title, held.length === 0 ? [] : [...boxRows(held.slice(0, RECENT), icon, tone, subtitle), <ListRow key="all" icon={ListFilter} title={tr.status.seeAll} chevron onPress={() => openCabinet({ view })} />]);
 
+  // As Dolabım's chips count them, and the tile opens that list: a view with nothing in it is no tile.
+  const counts = ([["expired", "error"], ["soon", "warning"], ["low", "neutral"]] as const).flatMap(([view, tone]) => {
+    const count = home.filter(({ box }) => inView(view, box, today)).length;
+    return count === 0 ? [] : [<CountTile key={view} count={count} label={tr.cabinet.views[view]} tone={tone} onPress={() => openCabinet({ view })} />];
+  });
   const owned = people.data.flatMap((person) => {
     const count = home.filter(({ box }) => box.personId === person.id).length;
     return count === 0 ? [] : [{ person, count }];
@@ -185,6 +215,7 @@ export default function Status() {
           ]),
     lists: card(tr.status.listsSection, [
       <ListRow key="buy" icon={ShoppingBasket} title={tr.toBuy.title} subtitle={tr.toBuy.count(cabinet.data.filter((product) => product.wanted).length)} chevron onPress={() => router.push("/to-buy")} />,
+      <ListRow key="history" icon={History} title={tr.history.title} subtitle={tr.history.hint} chevron onPress={() => router.push("/history")} />,
       ...(by.expired.length > 0
         ? [<ListRow key="dispose" icon={PackageX} iconColor={palette.error} title={tr.toDispose.title} subtitle={tr.toDispose.count(by.expired.length)} chevron onPress={() => router.push("/to-dispose")} />]
         : []),
@@ -207,7 +238,7 @@ export default function Status() {
         <ListRow key={person.id} leading={<PersonMark person={person} />} title={person.name} subtitle={tr.status.boxes(count)} chevron onPress={() => openCabinet({ person: person.id })} />
       )),
     ),
-    recent: card(tr.status.recentSection, boxRows(recent, RotateCcwClock, null, changed)),
+    recent: card(tr.status.recentSection, boxRows(recent, RotateCcwClock, null, changed, false)),
   };
 
   return (
@@ -228,19 +259,7 @@ export default function Status() {
       }
     >
       <Attention />
-      <Card>
-        <Body muted>{tr.status.summaryHint}</Body>
-        <Text style={[type.title, { color: palette.text, marginBottom: spacing.md }]}>{tr.status.summary(products, home.length)}</Text>
-        <View style={{ gap: spacing.sm }}>
-          {canScan ? <Button label={tr.addBox.scan} icon={ScanLine} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { scan: "1" } })} /> : null}
-          <Button label={tr.cabinet.add} icon={Plus} variant="secondary" onPress={add} />
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
-            <Button label={tr.catalogue.search} icon={Search} variant="ghost" size="sm" onPress={() => router.push({ pathname: "/add-box", params: { search: "1" } })} />
-            <Button label={tr.doses.quickAdd} icon={CalendarClock} variant="ghost" size="sm" onPress={() => router.push("/dose-plan")} />
-            <Button label={tr.doses.uploadPrescription} icon={FileUp} variant="ghost" size="sm" onPress={() => router.push("/add-document")} />
-          </View>
-        </View>
-      </Card>
+      <Summary products={products} boxes={home.length} counts={counts} onAdd={add} />
       {by.expired.length + by.soon.length + opened.length === 0 ? <Notice tone="success" text={tr.status.allGood} /> : null}
       <WorkspaceGrid>
         {layout?.order.filter((id) => !layout.hidden.includes(id) && cards[id] != null).map((id) => <Fragment key={id}>{cards[id]}</Fragment>)}

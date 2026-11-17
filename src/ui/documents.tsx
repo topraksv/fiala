@@ -17,7 +17,7 @@ import { DOCUMENT_KINDS } from "../db/schema";
 import { useDocuments, usePeople } from "../data/hooks";
 import { formatDay } from "../domain/boxes";
 import { tr } from "../i18n/tr";
-import { Body, Button, Card, ChoiceTile, ListRow, rowsOf, useTileColumns, SectionHeader } from "./components";
+import { AddPrompt, Body, Button, Card, ChoiceTile, ListRow, rowsOf, useTileColumns, SectionHeader } from "./components";
 import { radioGroupKeys } from "./keys";
 import { controlSize, spacing } from "./theme";
 
@@ -58,15 +58,22 @@ export function LinkedDocuments({ target, editable }: { target: { package: strin
   const router = useRouter();
   const linked = useDocuments().data.filter((document) => ("package" in target ? document.packageIds.includes(target.package) : document.productIds.includes(target.product)));
   if (linked.length === 0 && !editable) return null;
+  const add = () => router.push({ pathname: "/add-document", params: target });
   return (
     <>
       <SectionHeader>{tr.documents.title}</SectionHeader>
-      {linked.length > 0 ? <DocumentRows documents={linked} /> : null}
-      {editable ? (
-        <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
-          <Button label={tr.documents.add} icon={Plus} variant="ghost" size="sm" onPress={() => router.push({ pathname: "/add-document", params: target })} />
-        </View>
-      ) : null}
+      {linked.length === 0 ? (
+        <AddPrompt text={tr.documents.emptyTitle} label={tr.documents.add} onPress={add} />
+      ) : (
+        <>
+          <DocumentRows documents={linked} />
+          {editable ? (
+            <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
+              <Button label={tr.documents.add} icon={Plus} variant="ghost" size="sm" onPress={add} />
+            </View>
+          ) : null}
+        </>
+      )}
     </>
   );
 }

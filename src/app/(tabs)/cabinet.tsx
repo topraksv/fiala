@@ -19,13 +19,15 @@ import { deleteBoxes, editBoxes, type CabinetBox, type CabinetProduct, type Hous
 import { useDocuments, useHouseholds, useLocations, usePeople, useShownCabinet, useTags } from "../../data/hooks";
 import { BOX_VIEWS, SOON_DAYS, boxExpiry, expiryState, formatAmount, formatDay, inView, lastOpenDay, localDay, matchesSearch, sortProducts, type BoxView } from "../../domain/boxes";
 import { tr } from "../../i18n/tr";
-import { Body, Button, Card, ChoiceTile, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, useTileColumns, Screen, TextField } from "../../ui/components";
+import { Body, Button, Card, Chips, ChoiceTile, CompactCard, EmptyState, IconButton, ListRow, ReadFailed, rowsOf, useTileColumns, Screen, SearchField } from "../../ui/components";
+import { productPill } from "../../ui/expiry-pill";
 import { undoRows } from "../../db/mutations";
 import { takeCabinetFilter } from "../../ui/cabinet-link";
 import { appError } from "../../ui/dialog";
 import { radioGroupKeys } from "../../ui/keys";
 import { useSelection } from "../../ui/selection";
 import { kv } from "../../services/kv";
+import { StockBar } from "../../ui/stock-bar";
 import { showUndo } from "../../ui/undo";
 import { controlSize, spacing, useTheme } from "../../ui/theme";
 
@@ -138,7 +140,14 @@ export default function Cabinet() {
   const first = [...(anyStarred ? [{ id: STARRED, name: tr.cabinet.starred }] : []), ...(linked.size > 0 ? [{ id: LINKED, name: tr.documents.linked }] : [])];
   const tag = [...first, ...tags].some((each) => each.id === filed) ? filed : null;
   const chosenCount = [sort !== "expiry", view !== "home", person, place, tag].filter(Boolean).length;
-  const shown = visible(cabinet.data, { query, sort, view, person, place, tag, linked, today, ownerOf: (id) => nameOf(people, id) });
+  const filters = { query, sort, person, place, tag, linked, today, ownerOf: (id: string | null) => nameOf(people, id) };
+  const shown = visible(cabinet.data, { ...filters, view });
+  // How many boxes each chip would show, as Durum's tiles count them, with whatever else is chosen applied.
+  const chips = (["home", "expired", "soon", "low"] as const).map((id) => ({
+    id: id as BoxView,
+    name: tr.cabinet.views[id],
+    count: visible(cabinet.data, { ...filters, view: id }).reduce((boxes, product) => boxes + product.boxes.length, 0),
+  }));
   // A box of a household the person only reads is never chosen: everything chosen is changed.
   const selection = useSelection(shown.flatMap((product) => product.boxes).filter((box) => writes(box.cabinetId)));
   const chosenIds = () => selection.chosen.map((box) => box.id);
@@ -181,6 +190,7 @@ export default function Cabinet() {
         actions:
           holding ? (
             <View style={{ flexDirection: "row", gap: spacing.xs }}>
+              <SiftButton chosen={chosenCount} open={sifting} onPress={() => setSifting(!sifting)} />
               <IconButton icon={LayoutList} label={tr.cabinet.compact} on={compact} onPress={toggleCompact} />
               <IconButton icon={Plus} label={tr.cabinet.add} onPress={add} />
             </View>
@@ -197,28 +207,29 @@ export default function Cabinet() {
   // Rendering "empty" before the first read answers would flash the wrong screen.
   if (cabinet.status === "loading") return <Screen title={tr.tabs.cabinet} />;
 
+  const pair = <Shelves household={open} documents={documents.length} />;
+
   return (
     <Screen title={header.title} actions={header.actions}>
-      <OpenHousehold household={open} />
-      <Card rows>
-        <ListRow icon={FileText} title={tr.documents.title} subtitle={tr.documents.count(documents.length)} chevron onPress={() => router.push("/documents")} />
-      </Card>
       {!holding ? (
-        <EmptyState
-          icon={BriefcaseMedical}
-          title={tr.cabinet.emptyTitle}
-          hint={tr.cabinet.emptyHint}
-          skeleton
-          action={
-            <View style={{ gap: spacing.sm, alignItems: "center" }}>
-              <Button label={tr.cabinet.addFirst} icon={Plus} onPress={add} />
-              <Button label={tr.importFile.title} icon={FileUp} variant="ghost" size="sm" onPress={() => router.push("/import")} />
-            </View>
-          }
-        />
+        <>
+          {pair}
+          <EmptyState
+            icon={BriefcaseMedical}
+            title={tr.cabinet.emptyTitle}
+            hint={tr.cabinet.emptyHint}
+            skeleton
+            action={
+              <View style={{ gap: spacing.sm, alignItems: "center" }}>
+                <Button label={tr.cabinet.addFirst} icon={Plus} onPress={add} />
+                <Button label={tr.importFile.title} icon={FileUp} variant="ghost" size="sm" onPress={() => router.push("/import")} />
+              </View>
+            }
+          />
+        </>
       ) : (
         <>
-          <TextField
+          <SearchField
             accessibilityLabel={tr.cabinet.search}
             value={query}
             onChangeText={setQuery}
@@ -226,18 +237,8 @@ export default function Cabinet() {
             autoCapitalize="none"
             autoCorrect={false}
             maxLength={80}
-            style={{ marginBottom: spacing.sm }}
           />
-          <View style={{ alignItems: "flex-start", marginBottom: spacing.sm }}>
-            <Button
-              label={chosenCount > 0 ? tr.cabinet.siftChosen(chosenCount) : tr.cabinet.sift}
-              icon={SlidersHorizontal}
-              variant="secondary"
-              size="sm"
-              expanded={sifting}
-              onPress={() => setSifting(!sifting)}
-            />
-          </View>
+          <ViewChips options={chips} chosen={view} onChoose={setView} />
           {sifting ? (
             <>
               <View role="radiogroup" {...radioGroupKeys()} accessibilityLabel={tr.cabinet.sortBy} style={{ gap: spacing.sm, marginBottom: spacing.md }}>
@@ -263,22 +264,21 @@ export default function Cabinet() {
               <Filter table="tags" named={tags} first={first} chosen={tag} onChoose={setFiled} />
             </>
           ) : null}
+          {pair}
           {shown.length === 0 ? <Body muted>{query.trim() ? tr.cabinet.noMatch(query.trim()) : tr.cabinet.noFiltered}</Body> : null}
           {shown.map((product) => (
             <Card key={product.id} rows>
               <ListRow
                 icon={Pill}
-                iconColor={compact ? warning(product.boxes) : undefined}
+                iconColor={warning(product.boxes)}
+                pill={productPill(product.boxes, today)}
                 title={tr.common.joined(product.name, product.strength ?? undefined)}
                 subtitle={tr.common.joined(
                   // Whose cabinet, once there are two to tell apart.
                   open ? (product.cabinetId === open.id ? open.name : tr.households.private) : undefined,
                   tr.cabinet.boxes(product.boxes.length),
-                  // The short list keeps a product's soonest day, which its first box carries.
-                  // Said in words too: the icon's colour alone tells no screen reader, and warning and error are close.
-                  compact && product.boxes[0]?.expiresOn
-                    ? tr.common.joined(tr.cabinet.expires(formatDay(product.boxes[0].expiresOn)), tr.cabinet.expiryStates[expiryState(product.boxes[0].expiresOn, today, product.boxes[0].soonDays ?? SOON_DAYS)])
-                    : undefined,
+                  // The short list keeps a product's soonest day, which its first box carries; the pill says how near it is.
+                  compact && product.boxes[0]?.expiresOn ? tr.cabinet.expires(formatDay(product.boxes[0].expiresOn)) : undefined,
                   ...new Set(product.boxes.map((box) => nameOf(people, box.personId))),
                   product.activeSubstance ?? undefined,
                 )}
@@ -294,6 +294,7 @@ export default function Cabinet() {
                     iconColor={warning([box])}
                     title={box.expiresOn ? tr.common.joined(tr.cabinet.expires(formatDay(box.expiresOn)), tr.cabinet.expiryStates[expiryState(box.expiresOn, today, box.soonDays ?? SOON_DAYS)]) : tr.cabinet.noExpiry}
                     subtitle={subtitle(box)}
+                    footer={box.disposition ? undefined : <StockBar box={box} />}
                     chevron
                     onPress={() => (selection.active && choosable ? selection.toggle(box.id) : router.push({ pathname: "/box/[id]", params: { id: box.id } }))}
                     onLongPress={choosable ? () => selection.begin(box.id) : undefined}
@@ -309,13 +310,25 @@ export default function Cabinet() {
   );
 }
 
-/** The household shown beside the person's own boxes, and the way to another (F2.4). */
-function OpenHousehold({ household }: { household: Household | null }) {
+/** The views that have boxes, and the one chosen, as chips; with nothing to choose between there is no row. */
+function ViewChips({ options, chosen, onChoose }: { options: readonly { id: BoxView; name: string; count: number }[]; chosen: BoxView; onChoose: (view: BoxView) => void }) {
+  const shown = options.filter((option) => option.count > 0 || option.id === chosen);
+  return shown.length > 1 ? <Chips label={tr.cabinet.viewBy} options={shown} chosen={chosen} onChoose={onChoose} /> : null;
+}
+
+/** Sorting and the filters fold under this header button; its label counts what is chosen, and it says whether they are open. */
+function SiftButton({ chosen, open, onPress }: { chosen: number; open: boolean; onPress: () => void }) {
+  return <IconButton icon={SlidersHorizontal} label={chosen > 0 ? tr.cabinet.siftChosen(chosen) : tr.cabinet.sift} tone={chosen > 0 ? "primary" : "default"} expanded={open} onPress={onPress} />;
+}
+
+/** The household shown beside the person's own boxes and the way to another (F2.4), and the documents: two small cards, not two full rows. */
+function Shelves({ household, documents }: { household: Household | null; documents: number }) {
   const router = useRouter();
   return (
-    <Card rows>
-      <ListRow icon={House} title={household?.name ?? tr.households.none} subtitle={household ? tr.households.people(household.members) : tr.households.noneHint} chevron onPress={() => router.push("/households")} />
-    </Card>
+    <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md }}>
+      <CompactCard icon={House} title={household?.name ?? tr.households.none} subtitle={household ? tr.households.people(household.members) : tr.households.noneHint} onPress={() => router.push("/households")} />
+      <CompactCard icon={FileText} title={tr.documents.title} subtitle={tr.documents.count(documents)} onPress={() => router.push("/documents")} />
+    </View>
   );
 }
 

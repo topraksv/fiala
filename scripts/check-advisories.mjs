@@ -6,7 +6,17 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 // Each entry is a claim someone checked. Empty is allowed, and a stale entry fails as loudly as an unacknowledged advisory.
-const ACKNOWLEDGED = [];
+const ACKNOWLEDGED = [
+  {
+    id: "GHSA-fc5q-39xc-vjpf",
+    package: "picomatch",
+    checkedOn: "2026-11-18",
+    recheckAfter: "2027-01-18",
+    expectedPaths: ["@vitest/coverage-v8", "babel-preset-expo", "expo", "react-native", "react-native-reanimated", "react-native-worklets", "vitest"],
+    reason:
+      "No patched release: every version through 4.0.7, the latest, is affected (ReDoS on a repeated single-branch extglob). It matches globs written by the build tools themselves (Metro's file map, Babel, tinyglobby in react-native's Node scripts, Vitest), never text from a user, and the web export contains none of it.",
+  },
+];
 
 // Dependencies installed outside the npm registry, which `npm audit` and Dependabot cannot see; `reviewed` is what was read and found not to apply.
 const UNAUDITED = [

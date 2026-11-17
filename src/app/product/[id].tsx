@@ -8,10 +8,11 @@
  */
 
 import { useState } from "react";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import BookOpen from "lucide-react-native/icons/book-open";
 import Flag from "lucide-react-native/icons/flag";
+import Info from "lucide-react-native/icons/info";
 import Package from "lucide-react-native/icons/package";
 import Pencil from "lucide-react-native/icons/pencil";
 import Plus from "lucide-react-native/icons/plus";
@@ -21,17 +22,19 @@ import TagPlus from "lucide-react-native/icons/tag-plus";
 
 import { addNamed, editProduct, setPhoto, tagProduct, type CabinetBox, type Named, type ProductFields } from "../../data/cabinet";
 import { useCabinet, useHouseholds, useTags } from "../../data/hooks";
-import { formatAmount, formatDay, printedGtin } from "../../domain/boxes";
+import { formatAmount, formatDay, localDay, printedGtin } from "../../domain/boxes";
 import type { NewPhoto } from "../../data/photos";
 import { tr } from "../../i18n/tr";
 import { catalogueByGtin } from "../../services/guide";
-import { Button, Card, IconButton, ListRow, Missing, Screen, SectionHeader, ToggleRow } from "../../ui/components";
+import { Button, Card, Divider, IconButton, ListRow, Missing, Screen, SectionHeader, StatusPill, ToggleRow } from "../../ui/components";
 import { appError, appPrompt } from "../../ui/dialog";
 import { LinkedDocuments } from "../../ui/documents";
 import { ProductPlans } from "../../ui/doses";
+import { productPill } from "../../ui/expiry-pill";
 import { ViewOnly } from "../../ui/named-choices";
 import { PhotoField } from "../../ui/photo-field";
-import { spacing } from "../../ui/theme";
+import { StockBar } from "../../ui/stock-bar";
+import { spacing, type, useTheme } from "../../ui/theme";
 
 type Editable = keyof Omit<ProductFields, "gtin">;
 
@@ -109,49 +112,25 @@ export default function ProductScreen() {
   // What is left is what is at home: a box lost, thrown away or archived keeps its record, not its count.
   const home = product.boxes.filter((box) => box.disposition == null);
 
+  // What is set once waits behind one control in the header, open under the summary where it was asked for.
+  const details = (
+    <IconButton icon={editable ? Pencil : Info} label={editable ? tr.product.edit : tr.product.detailsSection} on={more} expanded={more} onPress={() => setMore(!more)} />
+  );
+
   return (
     <Screen
       back="/cabinet"
       title={product.name}
-      actions={changing(<IconButton icon={Star} label={tr.product.star} on={product.starred} onPress={() => void attempt(() => editProduct(product.id, { starred: !product.starred }))} />)}
+      actions={
+        <>
+          {changing(<IconButton icon={Star} label={tr.product.star} on={product.starred} onPress={() => void attempt(() => editProduct(product.id, { starred: !product.starred }))} />)}
+          {details}
+        </>
+      }
     >
       <ViewOnly cabinetId={product.cabinetId} />
-      <SectionHeader>{tr.product.totalSection}</SectionHeader>
-      <Card rows>
-        <ListRow title={tr.product.total(totals(home) ?? tr.cabinet.uncounted)} subtitle={tr.cabinet.boxes(home.length)} />
-        {product.boxes.map((box) => (
-          <ListRow
-            key={box.id}
-            icon={Package}
-            title={box.expiresOn ? tr.cabinet.expires(formatDay(box.expiresOn)) : tr.cabinet.noExpiry}
-            subtitle={tr.common.joined(
-              box.nickname ?? undefined,
-              box.disposition ? tr.cabinet.dispositions[box.disposition] : undefined,
-              box.counted ? tr.cabinet.remaining(formatAmount(box.remainingMilli), tr.units[box.unit]) : tr.cabinet.uncounted,
-            )}
-            chevron
-            onPress={() => router.push({ pathname: "/box/[id]", params: { id: box.id } })}
-          />
-        ))}
-        {editable ? <ToggleRow title={tr.product.wanted} value={product.wanted} onValueChange={(wanted) => void attempt(() => editProduct(product.id, { wanted }))} /> : null}
-      </Card>
-      {editable ? (
-        <View style={{ marginBottom: spacing.lg }}>
-          <Button label={tr.product.addBox} icon={Plus} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { product: product.id } })} />
-        </View>
-      ) : null}
+      <Summary boxes={home} wanted={editable ? product.wanted : null} onWanted={(wanted) => void attempt(() => editProduct(product.id, { wanted }))} />
 
-      <ProductPlans productId={product.id} editable={editable} />
-      <LinkedDocuments target={{ product: product.id }} editable={editable} />
-
-      {product.gtin ? (
-        <Card rows>
-          <ListRow icon={BookOpen} title={tr.product.inGuide} chevron onPress={() => void openInGuide(product.gtin!)} />
-        </Card>
-      ) : null}
-      <View style={{ alignItems: "flex-start", marginTop: spacing.md }}>
-        <Button label={editable ? tr.product.edit : tr.product.detailsSection} icon={Pencil} variant="secondary" size="sm" expanded={more} onPress={() => setMore(!more)} />
-      </View>
       {more ? (
         <>
           {editable ? (
@@ -185,6 +164,39 @@ export default function ProductScreen() {
           </Card>
         </>
       ) : null}
+
+      <SectionHeader>{tr.product.boxesSection}</SectionHeader>
+      <Card rows>
+        {product.boxes.map((box) => (
+          <ListRow
+            key={box.id}
+            icon={Package}
+            title={box.expiresOn ? tr.cabinet.expires(formatDay(box.expiresOn)) : tr.cabinet.noExpiry}
+            subtitle={tr.common.joined(
+              box.nickname ?? undefined,
+              box.disposition ? tr.cabinet.dispositions[box.disposition] : undefined,
+              box.counted ? tr.cabinet.remaining(formatAmount(box.remainingMilli), tr.units[box.unit]) : tr.cabinet.uncounted,
+            )}
+            footer={home.length > 1 && !box.disposition ? <StockBar box={box} /> : undefined}
+            chevron
+            onPress={() => router.push({ pathname: "/box/[id]", params: { id: box.id } })}
+          />
+        ))}
+        {editable ? (
+          <View style={{ paddingVertical: spacing.sm }}>
+            <Button label={tr.product.addBox} icon={Plus} variant="secondary" onPress={() => router.push({ pathname: "/add-box", params: { product: product.id } })} />
+          </View>
+        ) : null}
+      </Card>
+
+      <ProductPlans productId={product.id} editable={editable} />
+      <LinkedDocuments target={{ product: product.id }} editable={editable} />
+
+      {product.gtin ? (
+        <Card rows>
+          <ListRow icon={BookOpen} title={tr.product.inGuide} chevron onPress={() => void openInGuide(product.gtin!)} />
+        </Card>
+      ) : null}
       {product.gtin ? (
         <View style={{ alignItems: "flex-start", marginTop: spacing.md }}>
           <Button
@@ -197,6 +209,32 @@ export default function ProductScreen() {
         </View>
       ) : null}
     </Screen>
+  );
+}
+
+/** What is left across the boxes at home, how near the worst of their days is, and for whoever may change it the switch onto the list to buy. */
+function Summary({ boxes, wanted, onWanted }: { boxes: readonly CabinetBox[]; wanted: boolean | null; onWanted: (wanted: boolean) => void }) {
+  const { palette } = useTheme();
+  const pill = productPill(boxes, localDay());
+  return (
+    <Card>
+      <View style={{ gap: spacing.md }}>
+        <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: spacing.md }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[type.small, { color: palette.textSecondary }]}>{tr.product.totalSection}</Text>
+            <Text style={[type.title, { color: palette.textStrong }]}>{totals(boxes) ?? tr.cabinet.uncounted}</Text>
+          </View>
+          {pill ? <StatusPill pill={pill} /> : null}
+        </View>
+        {boxes.length === 1 ? <StockBar box={boxes[0]!} tall /> : null}
+        {wanted == null ? null : (
+          <>
+            <Divider flush />
+            <ToggleRow title={tr.product.wanted} value={wanted} onValueChange={onWanted} />
+          </>
+        )}
+      </View>
+    </Card>
   );
 }
 

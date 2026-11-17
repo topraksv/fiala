@@ -13,13 +13,13 @@ import { nowIso } from "../db/mutations";
 import type { DocumentFileType } from "../db/schema";
 import { fileTypeOf } from "../data/documents";
 import { isUuidShaped } from "./merge-policy";
-import { base64OfBlob, bytesOf, checkActive, refuse, refusedFiles, refusedForGood } from "./photos";
+import { aside, base64OfBlob, bytesOf, checkActive, forgetStaleClues, refusedForGood, setAside } from "./photos";
 import { getSupabase } from "./supabase";
 
 const BUCKET = "documents";
 const FILE = { pdf: ["pdf", "application/pdf"], jpeg: ["jpg", "image/jpeg"] } as const satisfies Record<DocumentFileType, readonly [string, string]>;
 
-const documentPath = (fileId: string, type: DocumentFileType) => `${fileId}/file.${FILE[type][0]}`;
+export const documentPath = (fileId: string, type: DocumentFileType) => `${fileId}/file.${FILE[type][0]}`;
 
 /** The files a live row names. */
 const NAMED = "SELECT file_id FROM documents WHERE deleted_at IS NULL AND file_id IS NOT NULL";
@@ -31,16 +31,16 @@ const NAMED = "SELECT file_id FROM documents WHERE deleted_at IS NULL AND file_i
  */
 export async function sendPendingDocuments(supabase: SupabaseClient, signal: AbortSignal): Promise<void> {
   const sqlite = await getSqliteAsync();
-  const pending = await sqlite.getAllAsync<{ id: string; data: string; type: DocumentFileType }>(
-    `SELECT f.id, f.data, MIN(d.file_type) AS type FROM document_files f JOIN documents d ON d.file_id = f.id AND d.deleted_at IS NULL
-      WHERE f.uploaded_at IS NULL GROUP BY f.id`,
+  await forgetStaleClues("document_files", NAMED);
+  const pending = await sqlite.getAllAsync<{ id: string; data: string; type: DocumentFileType; title: string }>(
+    `SELECT f.id, f.data, MIN(d.file_type) AS type, MIN(d.title) AS title FROM document_files f JOIN documents d ON d.file_id = f.id AND d.deleted_at IS NULL
+      WHERE f.uploaded_at IS NULL AND f.id NOT IN (${aside("document_files")}) GROUP BY f.id`,
   );
   for (const file of pending) {
-    if (refusedFiles.has(file.id)) continue;
     checkActive(signal);
     // `upsert`, so a send cut short is finished by the next.
     const { error } = await supabase.storage.from(BUCKET).upload(documentPath(file.id, file.type), bytesOf(file.data), { contentType: FILE[file.type][1], upsert: true });
-    if (error && refusedForGood(error)) refuse(file.id);
+    if (error && refusedForGood(error)) await setAside("document_files", file.id, file.title);
     else if (error) return;
     else await sqlite.runAsync("UPDATE document_files SET uploaded_at = ? WHERE id = ?", [nowIso(), file.id]);
   }
@@ -49,7 +49,9 @@ export async function sendPendingDocuments(supabase: SupabaseClient, signal: Abo
 /** Files a live row names that Storage does not have: this device holds the only copy. */
 export async function unsentDocumentCount(): Promise<number> {
   const sqlite = await getSqliteAsync();
-  return (await sqlite.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM document_files WHERE uploaded_at IS NULL AND id IN (${NAMED})`))!.n;
+  return (await sqlite.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM document_files WHERE uploaded_at IS NULL AND id IN (${NAMED}) AND id NOT IN (${aside("document_files")})`,
+  ))!.n;
 }
 
 /**
@@ -57,7 +59,7 @@ export async function unsentDocumentCount(): Promise<number> {
  * fetched; `null` when neither has it for this person, or it is not the type
  * its row says. A network failure throws, for the screen to say so.
  */
-export async function fetchDocumentFile(fileId: string, type: DocumentFileType): Promise<string | null> {
+export async function fetchDocumentFile(fileId: string, type: DocumentFileType, keep = true): Promise<string | null> {
   const sqlite = await getSqliteAsync();
   const held = await sqlite.getFirstAsync<{ data: string }>("SELECT data FROM document_files WHERE id = ?", [fileId]);
   if (held) return fileTypeOf(held.data) === type ? held.data : null;
@@ -71,6 +73,8 @@ export async function fetchDocumentFile(fileId: string, type: DocumentFileType):
   }
   const base64 = await base64OfBlob(data);
   if (fileTypeOf(base64) !== type) return null;
+  // A backup reads every file once; kept, each would stay on the device for good.
+  if (!keep) return base64;
   const now = nowIso();
   await sqlite.runAsync("INSERT OR IGNORE INTO document_files (id, data, created_at, uploaded_at) VALUES (?, ?, ?, ?)", [fileId, base64, now, now]);
   return base64;
@@ -79,18 +83,19 @@ export async function fetchDocumentFile(fileId: string, type: DocumentFileType):
 const swept = new WeakSet<AbortSignal>();
 
 /**
- * Once a sync session, the files no live row names leave this person's
- * Storage a month on, as photos do. On the device one goes at once when
- * Storage has it — a household left, a document deleted or moved away — and
- * one never sent waits the month, so an undo finds it.
+ * On the device, every sync, a file no live row names goes at once when
+ * Storage has it — a household left, a document deleted, moved away or no
+ * longer shown to this person (migration 25) — and one never sent waits the
+ * month, so an undo finds it. Once a sync session, the files no live row
+ * names leave this person's Storage a month on, as photos do.
  */
 export async function sweepUnnamedDocuments(supabase: SupabaseClient, signal: AbortSignal): Promise<void> {
-  if (swept.has(signal)) return;
-  swept.add(signal);
   const sqlite = await getSqliteAsync();
   // A month, as a photo's: a device may hold the row naming a file unsent. Inside the function, not a module constant, so its mutant is mapped to the test that kills it.
   const before = new Date(Date.now() - 30 * 86_400_000).toISOString();
   await sqlite.runAsync(`DELETE FROM document_files WHERE id NOT IN (${NAMED}) AND (uploaded_at IS NOT NULL OR created_at < ?)`, [before]);
+  if (swept.has(signal)) return;
+  swept.add(signal);
   const { data, error } = await supabase.rpc("unnamed_documents");
   if (error) return;
   const paths = data as string[];

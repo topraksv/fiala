@@ -128,3 +128,36 @@ async function readBoundedResponse(response: Response, maxBytes: number, message
   }
   return bytes;
 }
+
+/** What a backup archive is read in: small enough to hold, large enough to be few reads. */
+const CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * A picked file a chunk at a time, for one too large to hold whole: a backup
+ * with its files (F4.10). `next` gives the next chunk, `null` at the end;
+ * `close` lets the file go, however the reading ended. No size is refused
+ * here: the reader bounds each entry, and keeps none past its bound.
+ */
+export async function pickedChunks(asset: DocumentPickerAsset): Promise<{ next: () => Promise<Uint8Array | null>; close: () => void }> {
+  if (Platform.OS === "web") {
+    const blob: Blob = asset.file ?? (await fetch(asset.uri).then((response) => response.blob()));
+    let read = 0;
+    return {
+      next: async () => {
+        if (read >= blob.size) return null;
+        const chunk = new Uint8Array(await blob.slice(read, read + CHUNK_BYTES).arrayBuffer());
+        read += chunk.length;
+        return chunk;
+      },
+      close: () => {},
+    };
+  }
+  const handle = (await expoFile(asset.uri)).open();
+  return {
+    next: async () => {
+      const chunk = await handle.readBytes(CHUNK_BYTES);
+      return chunk.byteLength > 0 ? chunk : null;
+    },
+    close: () => handle.close(),
+  };
+}

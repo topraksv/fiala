@@ -56,6 +56,8 @@ export interface CabinetDocument extends DocumentFields {
   archived: boolean;
   /** Who added it; `null` until the server has said, which is this device's own. */
   createdBy: string | null;
+  /** The household members it shows to, sorted and comma-joined; `null` is the whole household. */
+  readers: string | null;
   createdAt: string;
   /** The boxes and products it names that are live on this device. */
   packageIds: string[];
@@ -137,24 +139,35 @@ export function movableBy(document: Pick<CabinetDocument, "cabinetId" | "created
   return document.cabinetId === me || document.createdBy === me || document.createdBy === null;
 }
 
+/** Account ids as `readers` holds them: sorted, once each; none is the whole household. */
+export function readersOf(ids: readonly string[] | null): string | null {
+  return ids ? [...new Set(ids)].sort().join(",") : null;
+}
+
 /**
- * Move a document to another cabinet (F3.5), as `moveBox` moves a box: made
- * afresh there with its links, and tombstoned here. The tombstone keeps
- * nothing anyone could read, its file least: an editor of the household it
- * left may bring a tombstone back to life, and the server checks a file only
- * when a write names it anew. The undo names it anew, as its sender. Its new
- * id, and one write `undoRows` takes back whole; `null` when there was
- * nothing to move.
+ * Move a document to another cabinet, or show it to other members of its
+ * household (F3.5), as `moveBox` moves a box: made afresh there with its
+ * links, and tombstoned here. The server keeps a row's readers as written
+ * (migration 25), and those no longer chosen learn of it by the tombstone.
+ * The tombstone keeps nothing anyone could read, its file least: an editor
+ * of the household it left may bring a tombstone back to life, and the
+ * server checks a file only when a write names it anew. The undo names it
+ * anew, as its sender. Its new id, and one write `undoRows` takes back
+ * whole; `null` when there was nothing to move.
  */
-export async function moveDocument(documentId: string, cabinetId: string): Promise<{ id: string; written: RowsWritten } | null> {
+export async function moveDocument(
+  documentId: string,
+  cabinetId: string,
+  readers: string | null = null,
+): Promise<{ id: string; written: RowsWritten } | null> {
   const id = uuidv7();
   const written = await writeUndoable(async () => {
     const document = await findRow("documents", documentId);
-    if (!document || document.deleted_at != null || document.cabinet_id === cabinetId) return [];
+    if (!document || document.deleted_at != null || (document.cabinet_id === cabinetId && document.readers === readers)) return [];
     const writes: RowWrite[] = [];
     const { tombstoneVersion: _, ...shape } = fromDbShape("documents", document);
     // The server names the mover as who added it (migration 14).
-    writes.push({ table: "documents", row: { ...shape, id, cabinetId, personId: await nameThere("people", document.person_id, cabinetId, writes), createdBy: null } });
+    writes.push({ table: "documents", row: { ...shape, id, cabinetId, readers, personId: await nameThere("people", document.person_id, cabinetId, writes), createdBy: null } });
     writes.push(...(await relinked("document_id", documentId, id, cabinetId)));
     // The file follows the new row: a tombstone still naming it could be revived by an editor of the old cabinet.
     writes.push({ table: "documents", row: { ...shape, fileId: null, fileType: null, byteSize: null, deletedAt: nowIso() } });

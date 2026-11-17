@@ -16,7 +16,7 @@ import { EVERY_DAY, timesOf } from "../domain/doses";
 import { tr } from "../i18n/tr";
 import type { DoseStatus } from "../db/schema";
 import { undoRows } from "../db/mutations";
-import { Button, Card, ListRow, SectionHeader } from "./components";
+import { AddPrompt, Button, Card, ListRow, SectionHeader } from "./components";
 import { appError } from "./dialog";
 import { showUndo } from "./undo";
 import { spacing } from "./theme";
@@ -59,15 +59,22 @@ export function ProductPlans({ productId, editable }: { productId: string; edita
   const router = useRouter();
   const plans = useDosePlans().data.filter((plan) => plan.productId === productId);
   if (plans.length === 0 && !editable) return null;
+  const add = () => router.push({ pathname: "/dose-plan", params: { product: productId } });
   return (
     <>
       <SectionHeader>{tr.doses.plansSection}</SectionHeader>
-      {plans.length > 0 ? <PlanRows plans={plans} /> : null}
-      {editable ? (
-        <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
-          <Button label={tr.doses.add} icon={Plus} variant="ghost" size="sm" onPress={() => router.push({ pathname: "/dose-plan", params: { product: productId } })} />
-        </View>
-      ) : null}
+      {plans.length === 0 ? (
+        <AddPrompt text={tr.doses.emptyTitle} label={tr.doses.add} onPress={add} />
+      ) : (
+        <>
+          <PlanRows plans={plans} />
+          {editable ? (
+            <View style={{ alignItems: "flex-start", marginBottom: spacing.lg }}>
+              <Button label={tr.doses.add} icon={Plus} variant="ghost" size="sm" onPress={add} />
+            </View>
+          ) : null}
+        </>
+      )}
     </>
   );
 }

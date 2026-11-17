@@ -273,6 +273,7 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
             <Stack.Screen name="emergency/[id]" />
             <Stack.Screen name="to-buy" />
             <Stack.Screen name="to-dispose" />
+            <Stack.Screen name="history" />
             <Stack.Screen name="notices" />
             <Stack.Screen name="status-cards" />
             <Stack.Screen name="profile" />

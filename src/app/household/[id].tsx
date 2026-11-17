@@ -122,7 +122,7 @@ export default function HouseholdScreen() {
 /** Who moved or changed which box lately (`docs/TASKS.md` F2.8); a row opens the box. */
 function Activity({ cabinetId }: { cabinetId: string }) {
   const router = useRouter();
-  const activity = useActivity(cabinetId);
+  const activity = useActivity([cabinetId]);
   const writer = useWriter(cabinetId);
   const people = usePeople().data;
   const places = useLocations().data;

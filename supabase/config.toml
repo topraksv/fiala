@@ -440,3 +440,8 @@ enabled = true
 # and a caller it cannot name gets only the anon-granted signed-out limit.
 [functions.send-feedback]
 verify_jwt = false
+
+# Called by pg_cron, never by a client: the gateway's JWT check has nothing to
+# check, and the function refuses any call without the shared secret.
+[functions.storage-sweep]
+verify_jwt = false

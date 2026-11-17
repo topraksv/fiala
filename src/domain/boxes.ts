@@ -412,3 +412,97 @@ export function catalogueFields(listed: string): { name: string; strength: strin
     pack: pack ?? (count ? lower(`${count} ${form}`.trim()) : null),
   };
 }
+
+/** What a step of a box's history was, for its filter and its mark: a use, an addition, an edit, or the box leaving the cabinet. */
+export const HISTORY_KINDS = ["use", "added", "edit", "left"] as const;
+export type HistoryKind = (typeof HISTORY_KINDS)[number];
+
+/** One move or edit of a box as the history page reads it; the activity read fits it. */
+export interface HistoryEntry {
+  at: string;
+  /** A move's; null for an edit. */
+  reason: string | null;
+  /** An edit's, each field as `[before, after]`; null for a move. */
+  changes: Record<string, [unknown, unknown]> | null;
+  productId: string;
+  personId: string | null;
+  locationId: string | null;
+}
+
+/** A count is an edit of the amount; a box brought back into the cabinet is an edit too, since it left nothing. */
+export function historyKind({ reason, changes }: Pick<HistoryEntry, "reason" | "changes">): HistoryKind {
+  if (changes) return changes.disposition?.[1] != null ? "left" : "edit";
+  return reason === "use" ? "use" : reason === "correction" ? "edit" : "added";
+}
+
+/** The year of the history's longest span and of the count of boxes that left. */
+const YEAR_DAYS = 365;
+
+/** The spans the history is cut by, in days: a week, a month, a year. */
+export const HISTORY_SPANS = [7, 30, YEAR_DAYS] as const;
+
+/** Whether a stamp falls in the last `days` days, today the first of them. */
+export function withinDays(at: string, days: number, today: string): boolean {
+  return daysUntil(localDay(new Date(at)), today) > -days;
+}
+
+export interface HistoryFilter {
+  kind: HistoryKind | null;
+  productId: string | null;
+  personId: string | null;
+  locationId: string | null;
+  /** The last this many days; `null` is all of it. */
+  days: number | null;
+}
+
+/** The entries that fit every choice made; a choice of `null` takes all. A box is read as it is now, not as it was when the entry was written. */
+export function filterHistory<E extends HistoryEntry>(entries: readonly E[], filter: HistoryFilter, today: string): E[] {
+  return entries.filter(
+    (entry) =>
+      (filter.kind == null || historyKind(entry) === filter.kind) &&
+      (filter.productId == null || entry.productId === filter.productId) &&
+      (filter.personId == null || entry.personId === filter.personId) &&
+      (filter.locationId == null || entry.locationId === filter.locationId) &&
+      (filter.days == null || withinDays(entry.at, filter.days, today)),
+  );
+}
+
+/** Entries, newest first, under the local day they fall on. */
+export function groupByDay<E extends { at: string }>(entries: readonly E[]): { day: string; entries: E[] }[] {
+  const groups: { day: string; entries: E[] }[] = [];
+  for (const entry of entries) {
+    const day = localDay(new Date(entry.at));
+    const last = groups.at(-1);
+    if (last?.day === day) last.entries.push(entry);
+    else groups.push({ day, entries: [entry] });
+  }
+  return groups;
+}
+
+const LEAVES = ["archived", "disposed", "lost"] as const;
+
+/** How many boxes left the cabinet in the last year, by how: finished, disposed of, or lost. */
+export function leftCounts(entries: readonly Pick<HistoryEntry, "at" | "changes">[], today: string): Record<(typeof LEAVES)[number], number> {
+  const counts = { archived: 0, disposed: 0, lost: 0 };
+  for (const { at, changes } of entries) {
+    const how = LEAVES.find((leave) => leave === changes?.disposition?.[1]);
+    if (how && withinDays(at, YEAR_DAYS, today)) counts[how]++;
+  }
+  return counts;
+}
+
+/** What a product or a box lacks that the cabinet could say: a box at home with no expiry, a medicine held with no active substance. `box` is `null` for the substance. A box with nothing left asks for nothing, as on Durum. */
+export function missingInfo<P extends { activeSubstance?: string | null; boxes: readonly BoxFacts[] }>(products: readonly P[]): { product: P; box: P["boxes"][number] | null }[] {
+  return products.flatMap((product) => {
+    const held = product.boxes.filter((box) => box.disposition == null && !isEmpty(box));
+    const undated = held.filter((box) => box.expiresOn == null).map((box) => ({ product, box }));
+    return held.length > 0 && !product.activeSubstance?.trim() ? [{ product, box: null }, ...undated] : undated;
+  });
+}
+
+/** What the boxes at home hold, per unit, of those counted: boxes of one medicine need not share a unit. */
+export function remainingByUnit<U extends string>(boxes: readonly (Pick<BoxFacts, "disposition" | "counted" | "remainingMilli"> & { unit: U })[]): { unit: U; milli: number }[] {
+  const sums = new Map<U, number>();
+  for (const box of boxes) if (box.disposition == null && box.counted) sums.set(box.unit, (sums.get(box.unit) ?? 0) + box.remainingMilli);
+  return [...sums].map(([unit, milli]) => ({ unit, milli }));
+}

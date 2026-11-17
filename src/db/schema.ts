@@ -257,6 +257,12 @@ export const documents = sqliteTable("documents", {
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
   /** Who added it, stamped by the server; none until it is pushed, which is this device's own. */
   createdBy: text("created_by"),
+  /**
+   * The household members it shows to, account ids sorted and comma-joined;
+   * none is the whole household. Its writer always reads it. Fixed on the
+   * server once written: a change is a new row (`moveDocument`).
+   */
+  readers: text("readers"),
 });
 
 /**

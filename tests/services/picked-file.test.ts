@@ -5,6 +5,8 @@ const nativeFile = vi.hoisted(() => ({
   size: 0,
   text: vi.fn(async () => "{}"),
   bytes: vi.fn(async () => new Uint8Array()),
+  content: new Uint8Array(),
+  closed: false,
 }));
 
 vi.mock("react-native", () => ({
@@ -28,10 +30,56 @@ vi.mock("expo-file-system", () => ({
     bytes() {
       return nativeFile.bytes();
     }
+
+    open() {
+      let at = 0;
+      return {
+        readBytes: async (length: number) => nativeFile.content.slice(at, (at += length)),
+        close: () => void (nativeFile.closed = true),
+      };
+    }
   },
 }));
 
-import { readPickedBytes, readPickedText } from "../../src/services/picked-file";
+import { pickedChunks, readPickedBytes, readPickedText } from "../../src/services/picked-file";
+
+/** 2.5 MB of counted bytes: two whole chunks and half of one. */
+const LARGE = new Uint8Array(2.5 * 1024 * 1024).map((_, at) => at % 251);
+
+async function drained(next: () => Promise<Uint8Array | null>): Promise<number[]> {
+  const sizes: number[] = [];
+  const all: Uint8Array[] = [];
+  for (let chunk = await next(); chunk; chunk = await next()) {
+    sizes.push(chunk.length);
+    all.push(chunk);
+  }
+  expect(Buffer.concat(all).equals(Buffer.from(LARGE))).toBe(true);
+  return sizes;
+}
+
+describe("a picked file read a chunk at a time", () => {
+  it("reads a browser's file in megabytes to its end", async () => {
+    platform.os = "web";
+    const chunks = await pickedChunks({ uri: "blob:x", name: "yedek.zip", file: new File([LARGE], "yedek.zip") } as never);
+    expect(await drained(chunks.next)).toEqual([1048576, 1048576, 524288]);
+    chunks.close();
+    vi.stubGlobal("fetch", async (uri: string) => new Response(uri === "blob:y" ? LARGE : null));
+    const fetched = await pickedChunks({ uri: "blob:y", name: "yedek.zip" } as never);
+    vi.unstubAllGlobals();
+    expect(await drained(fetched.next), "one the picker gave only an address for").toHaveLength(3);
+  });
+
+  it("reads a phone's file in megabytes, and lets it go when told", async () => {
+    platform.os = "ios";
+    nativeFile.content = LARGE;
+    nativeFile.closed = false;
+    const chunks = await pickedChunks({ uri: "file:///yedek.zip", name: "yedek.zip" } as never);
+    expect(await drained(chunks.next)).toEqual([1048576, 1048576, 524288]);
+    expect(nativeFile.closed).toBe(false);
+    chunks.close();
+    expect(nativeFile.closed).toBe(true);
+  });
+});
 
 describe("picked file limits", () => {
   beforeEach(() => {

@@ -407,7 +407,10 @@ export function circle(size: number): number {
  */
 export const controlSize = { check: 26, compact: 36, minimumTarget: 44, regular: 48 } as const;
 
-export const iconSize = { compact: 15, control: 17, headerBack: 24 } as const;
+export const iconSize = { compact: 15, control: 17, tile: 22, headerBack: 24 } as const;
+
+/** A share drawn as a filled track: the thin one under a list row, the taller one under a summary figure. */
+export const progressBar = { height: 6, tall: 8 } as const;
 
 /** lucide's stroke, heavier than its default so a small mark holds its weight beside text. */
 export const iconStroke = { regular: 2.2, mark: 2.5, quiet: 1.8 } as const;

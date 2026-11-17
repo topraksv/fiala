@@ -15,6 +15,7 @@ import {
   type StyleProp,
   type TextInputProps,
   type TextStyle,
+  type ViewProps,
   type ViewStyle,
   type ScrollViewInstance,
   type TextInputInstance,
@@ -23,12 +24,15 @@ import { useRouter, useScrollToTop, useSegments, type Href } from "expo-router";
 import Check from "lucide-react-native/icons/check";
 import AlertCircle from "lucide-react-native/icons/circle-alert";
 import CheckCircle2 from "lucide-react-native/icons/circle-check";
+import ChevronDown from "lucide-react-native/icons/chevron-down";
 import ChevronLeft from "lucide-react-native/icons/chevron-left";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
 import DatabaseZap from "lucide-react-native/icons/database-zap";
 import Eye from "lucide-react-native/icons/eye";
 import EyeOff from "lucide-react-native/icons/eye-off";
 import Minus from "lucide-react-native/icons/minus";
+import Plus from "lucide-react-native/icons/plus";
+import Search from "lucide-react-native/icons/search";
 import type { LucideIcon } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tr } from "../i18n/tr";
@@ -37,7 +41,8 @@ import { isSupabaseConfigured } from "../sync/supabase";
 import { selectionTap } from "./haptics";
 import { interactionBleed, interactionSurface } from "./interaction";
 import { FOCUS_BOX } from "./focus-ring";
-import { webKeys } from "./keys";
+import type { Pill } from "./expiry-pill";
+import { radioGroupKeys, webKeys } from "./keys";
 import { KeyboardSafeScrollView } from "./keyboard-safe";
 import { useReducedMotion, useSpringTo, useWaitBreath } from "./motion";
 import { navigateBack } from "./navigation";
@@ -60,6 +65,7 @@ import {
   motion,
   navigationInset,
   offset,
+  progressBar,
   proseLeading,
   radius,
   sectionMark,
@@ -271,26 +277,35 @@ export function Card({ children, rows = false }: { children: ReactNode; rows?: b
   );
 }
 
-/** A card heading: its mark in a soft square, a name, and a line on what the card does, over the card's own controls. */
-export function PanelHeader({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description?: string }) {
+/**
+ * The soft square an icon sits in, on a card heading and at the head of every row: the brand's soft fill,
+ * or, given a status colour, that colour's own tint behind it.
+ */
+export function Mark({ icon: Icon, color }: { icon: LucideIcon; color?: string }) {
+  const { palette } = useTheme();
+  return (
+    <View
+      accessible={false}
+      style={{
+        width: controlSize.compact,
+        height: controlSize.compact,
+        borderRadius: radius.md,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: color ? color + alpha.noticeTint : palette.primarySoft,
+      }}
+    >
+      <Icon accessible={false} size={iconSize.control} color={color ?? palette.accentText} strokeWidth={iconStroke.regular} />
+    </View>
+  );
+}
+
+/** A card heading: its mark, a name, and a line on what the card does, over the card's own controls. */
+export function PanelHeader({ icon, title, description }: { icon: LucideIcon; title: string; description?: string }) {
   const { palette } = useTheme();
   return (
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing.md, marginBottom: spacing.md }}>
-      <View
-        accessible={false}
-        style={{
-          width: PANEL_MARK,
-          height: PANEL_MARK,
-          borderRadius: radius.sm,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: palette.primarySoft,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: palette.primary + alpha.edge,
-        }}
-      >
-        <Icon accessible={false} size={iconSize.control} color={palette.accentText} strokeWidth={iconStroke.regular} />
-      </View>
+      <Mark icon={icon} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text accessibilityRole="header" aria-level={2} style={[type.body, { color: palette.textStrong, fontFamily: font.semibold }]}>
           {title}
@@ -300,9 +315,6 @@ export function PanelHeader({ icon: Icon, title, description }: { icon: LucideIc
     </View>
   );
 }
-
-/** The mark beside a card's heading. */
-const PANEL_MARK = controlSize.compact;
 
 /** A hairline between rows; `flush` inside a `rows` card, where the rows carry the air. */
 export function Divider({ flush = false }: { flush?: boolean }) {
@@ -357,6 +369,8 @@ export function ListRow({
   leading,
   title,
   subtitle,
+  pill,
+  footer,
   right,
   chevron = false,
   onPress,
@@ -364,11 +378,16 @@ export function ListRow({
   selected,
 }: {
   icon?: LucideIcon;
+  /** A status colour for the mark; without one it wears the brand's. */
   iconColor?: string;
   /** Drawn where the icon is, for a row whose mark is not an icon: a person's. */
   leading?: ReactNode;
   title: string;
   subtitle?: string;
+  /** What state the row's record is in, before the chevron: part of what a screen reader hears. */
+  pill?: Pill | null;
+  /** Under the row, in the text's column: a stock bar, which keeps its own air so that none shows where it draws nothing. */
+  footer?: ReactNode;
   right?: ReactNode;
   chevron?: boolean;
   onPress?: () => void;
@@ -384,11 +403,12 @@ export function ListRow({
   const content = (
     <View style={{ paddingVertical: spacing.md - 2 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-        {Icon ? <Icon accessible={false} size={iconSize.control} color={iconColor ?? palette.accentText} strokeWidth={iconStroke.regular} /> : leading}
+        {Icon ? <Mark icon={Icon} color={iconColor} /> : leading}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[type.body, { color: palette.text, fontFamily: font.medium }]}>{title}</Text>
           {subtitle ? <Text style={[type.small, { color: palette.textSecondary, marginTop: offset.hair }]}>{subtitle}</Text> : null}
         </View>
+        {pill ? <StatusPill pill={pill} /> : null}
         {beside ? null : right}
         {selected !== undefined ? (
           <CheckMark checked={selected} />
@@ -396,13 +416,14 @@ export function ListRow({
           <ChevronRight accessible={false} size={iconSize.control} color={palette.textSecondary} strokeWidth={iconStroke.regular} />
         ) : null}
       </View>
+      {footer ? <View style={{ marginLeft: controlSize.compact + spacing.md }}>{footer}</View> : null}
     </View>
   );
   if (!onPress) return content;
   const row = (
     <Press
       accessibilityRole="button"
-      accessibilityLabel={tr.common.withDetail(title, subtitle ?? "")}
+      accessibilityLabel={tr.common.withDetail(title, tr.common.joined(subtitle, pill?.label))}
       accessibilityState={{ selected }}
       onPress={onPress}
       {...rowPress(onLongPress)}
@@ -636,6 +657,19 @@ export function TextField({
         {secure ? <PasswordEye hidden={hidden} onPress={() => setHidden(!hidden)} /> : null}
       </View>
       {error ? <FieldError text={error} /> : null}
+    </View>
+  );
+}
+
+/** A text field with a lens inside its leading edge: Dolabım's search. */
+export function SearchField(props: TextInputProps & { examples?: readonly string[] }) {
+  const { palette } = useTheme();
+  return (
+    <View style={{ marginBottom: spacing.sm }}>
+      <TextField {...props} style={{ paddingLeft: spacing.md + iconSize.control + spacing.sm }} />
+      <View pointerEvents="none" accessible={false} style={{ position: "absolute", left: spacing.md, top: 0, bottom: 0, justifyContent: "center" }}>
+        <Search accessible={false} size={iconSize.control} color={palette.textSecondary} strokeWidth={iconStroke.regular} />
+      </View>
     </View>
   );
 }
@@ -925,6 +959,7 @@ export function IconButton({
   tone = "default",
   disabled = false,
   on,
+  expanded,
   field = false,
 }: {
   icon: LucideIcon;
@@ -937,6 +972,8 @@ export function IconButton({
   disabled?: boolean;
   /** A toggle's state: on fills the icon and the button, and a screen reader hears it pressed. */
   on?: boolean;
+  /** A button that shows and hides what it controls, as `Button`'s `expanded` does. */
+  expanded?: boolean;
 }) {
   const { palette } = useTheme();
   const color = disabled
@@ -947,8 +984,9 @@ export function IconButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       aria-pressed={on}
+      aria-expanded={expanded}
       // A phone has no `aria-pressed` (React Native 0.86 maps none): there the state is `selected`.
-      accessibilityState={Platform.OS === "web" ? { disabled } : { disabled, selected: on }}
+      accessibilityState={Platform.OS === "web" ? { disabled, expanded } : { disabled, selected: on, expanded }}
       disabled={disabled}
       onPress={onPress}
       style={{ minWidth: controlSize.minimumTarget, minHeight: controlSize.minimumTarget, alignItems: "center", justifyContent: "center" }}
@@ -1027,7 +1065,7 @@ function CardsSkeleton() {
     <View accessible={false} aria-hidden style={{ gap: density.list.rowGap }}>
       {[0, 1, 2].map((row) => (
         <View key={row} style={{ ...cardEdge(palette), flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-          {block(iconSize.control, iconSize.control, radius.sm)}
+          {block(controlSize.compact, controlSize.compact, radius.md)}
           <View style={{ flex: 1, gap: spacing.xs }}>
             {block(motion.skeleton.lines[0], type.body.fontSize, radius.sm)}
             {block(motion.skeleton.lines[1], type.small.fontSize, radius.sm)}
@@ -1085,6 +1123,281 @@ export function EmptyState({
       </Body>
       {action ? <View style={{ marginTop: spacing.md }}>{action}</View> : null}
     </View>
+  );
+}
+
+/** A record's state in a word or two, tinted by how pressing it is: red is past, amber is near, the brand's quiet green is fine. */
+export function StatusPill({ pill }: { pill: Pill }) {
+  const { palette } = useTheme();
+  const look =
+    pill.tone === "ok"
+      ? { background: palette.secondarySoft, color: palette.secondaryText }
+      : { background: palette[pill.tone] + alpha.noticeTint, color: pill.tone === "error" ? palette.errorText : palette.warningText };
+  return (
+    <View style={{ flexShrink: 0, backgroundColor: look.background, borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: offset.tuck }}>
+      <Text style={[type.small, { color: look.color, fontFamily: font.semibold }]}>{pill.label}</Text>
+    </View>
+  );
+}
+
+/**
+ * A share filling on the spring from wherever it was last drawn, never from
+ * zero (`docs/UI.md` section 7). Decoration: the figure beside it is the text.
+ * Gital's, with a taller form for a summary card's headline figure.
+ */
+export function ProgressBar({ value, color, tall = false }: { value: number; color?: string; tall?: boolean }) {
+  const { palette } = useTheme();
+  const [width, setWidth] = useState(0);
+  const [progress] = useState(() => new Animated.Value(value));
+  useSpringTo(progress, value);
+  const height = tall ? progressBar.tall : progressBar.height;
+  return (
+    <View
+      accessible={false}
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
+      style={{ height, borderRadius: circle(height), backgroundColor: palette.surfaceAlt, overflow: "hidden" }}
+    >
+      {/* Slid in from the left rather than widened, so the spring runs on the
+          native driver and the rounded end stays round. Hidden until measured,
+          or the first frame would draw it full. */}
+      <Animated.View
+        style={{
+          height,
+          borderRadius: circle(height),
+          backgroundColor: color ?? palette.primary,
+          opacity: width > 0 ? 1 : 0,
+          transform: [{ translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [-width, 0] }) }],
+        }}
+      />
+    </View>
+  );
+}
+
+/** The pill every chip paints inside its 44-point box: the compact height, the hairline, the brand's fill when chosen. */
+function chipPill(palette: Palette, state: PressableStateCallbackType, selected: boolean): ViewStyle {
+  return {
+    height: controlSize.compact,
+    paddingHorizontal: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + offset.tight,
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: selected ? palette.primary : palette.border + alpha.controlEdge,
+    ...interactionSurface(palette, state, { base: selected ? palette.primary : palette.surface }),
+  };
+}
+
+/** A chip that opens a choice under it rather than being one: the filter's name and its answer, with a chevron. */
+export function DisclosureChip({ icon: Icon, label, expanded, onPress }: { icon: LucideIcon; label: string; expanded: boolean; onPress: () => void }) {
+  const { palette } = useTheme();
+  return (
+    <Press
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      aria-expanded={expanded}
+      accessibilityState={{ expanded }}
+      onPress={onPress}
+      style={{ minHeight: controlSize.minimumTarget, justifyContent: "center" }}
+    >
+      {(state) => (
+        <View {...FOCUS_BOX} style={chipPill(palette, state, false)}>
+          <Icon accessible={false} size={iconSize.compact} color={palette.accentText} strokeWidth={iconStroke.regular} />
+          <Text style={[type.buttonCompact, { color: palette.text }]}>{label}</Text>
+          <ChevronDown accessible={false} size={iconSize.compact} color={palette.textSecondary} strokeWidth={iconStroke.regular} />
+        </View>
+      )}
+    </Press>
+  );
+}
+
+/** A row of chips and disclosure chips, wrapping onto a second line rather than running off the edge (`docs/UI.md` section 9). */
+export function ChipRow({ children, ...props }: ViewProps & { children: ReactNode }) {
+  return (
+    <View {...props} style={{ flexDirection: "row", flexWrap: "wrap", columnGap: spacing.sm, marginBottom: spacing.sm }}>
+      {children}
+    </View>
+  );
+}
+
+/**
+ * One answer of a few, as pills that wrap onto a second line rather than run
+ * off the edge (`docs/UI.md` section 9). Each is a 44-point box with the
+ * compact pill painted inside, as `IconButton`; the count follows its name.
+ */
+export function Chips<T extends string | number | null>({
+  label,
+  options,
+  chosen,
+  onChoose,
+}: {
+  label: string;
+  options: readonly { id: T; name: string; count?: number }[];
+  chosen: T;
+  onChoose: (id: T) => void;
+}) {
+  const { palette } = useTheme();
+  return (
+    <ChipRow role="radiogroup" {...radioGroupKeys()} accessibilityLabel={label}>
+      {options.map((option) => {
+        const selected = chosen === option.id;
+        const color = selected ? palette.onPrimary : palette.text;
+        return (
+          <Press
+            key={String(option.id)}
+            {...radioChoice({ label: tr.common.withDetail(option.name, option.count == null ? "" : String(option.count)), selected, onPress: () => onChoose(option.id) })}
+            style={{ minHeight: controlSize.minimumTarget, justifyContent: "center" }}
+          >
+            {(state) => (
+              <View {...FOCUS_BOX} style={chipPill(palette, state, selected)}>
+                <Text style={[type.buttonCompact, { color }]}>{option.name}</Text>
+                {option.count == null ? null : <Text style={[type.buttonCompact, { color: selected ? palette.onPrimary : palette.textSecondary }]}>{option.count}</Text>}
+              </View>
+            )}
+          </Press>
+        );
+      })}
+    </ChipRow>
+  );
+}
+
+/** Two or three views of one screen on a single track, the chosen one raised: Geçmiş and Raporlar. */
+export function Segmented<T extends string>({ label, options, chosen, onChoose }: { label: string; options: readonly { id: T; name: string }[]; chosen: T; onChoose: (id: T) => void }) {
+  const { palette } = useTheme();
+  return (
+    <View
+      role="radiogroup"
+      {...radioGroupKeys()}
+      accessibilityLabel={label}
+      style={{ flexDirection: "row", gap: spacing.xs, padding: spacing.xs, borderRadius: radius.lg, borderCurve: "continuous", backgroundColor: palette.surfaceAlt, marginBottom: spacing.md }}
+    >
+      {options.map((option) => {
+        const selected = chosen === option.id;
+        return (
+          <Press
+            key={option.id}
+            {...radioChoice({ label: option.name, selected, onPress: () => onChoose(option.id) })}
+            style={(state) => ({
+              flex: 1,
+              minWidth: 0,
+              minHeight: controlSize.minimumTarget,
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: radius.md,
+              borderCurve: "continuous",
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: selected ? palette.border + alpha.edge : "transparent",
+              ...(selected ? themeShadow.toggleThumb(palette) : null),
+              ...interactionSurface(palette, state, { base: selected ? palette.surface : undefined }),
+            })}
+          >
+            <Text style={[type.body, { color: selected ? palette.textStrong : palette.textSecondary, fontFamily: font.semibold }]}>{option.name}</Text>
+          </Press>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Tiles in rows of as many as fit at this text size, each row's of one width and height; fewer than a row holds share it. */
+export function TileGrid({ wanted, children }: { wanted: number; children: ReactNode[] }) {
+  const columns = Math.min(useTileColumns(wanted), Math.max(1, children.length));
+  return (
+    <View style={{ gap: spacing.sm }}>
+      {rowsOf(children, columns).map((row, at) => (
+        <View key={at} style={{ flexDirection: "row", gap: spacing.sm }}>
+          {row}
+          {Array.from({ length: columns - row.length }, (_, spare) => (
+            <View key={`spare${spare}`} style={{ flex: 1 }} />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** What a tile of `TileGrid` shares: the bordered box, one width of the row, content centred. */
+function tileBox(palette: Palette, state: PressableStateCallbackType, tint?: string): ViewStyle {
+  return {
+    flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    minHeight: controlSize.minimumTarget,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderCurve: "continuous",
+    borderWidth: tint ? 0 : StyleSheet.hairlineWidth,
+    borderColor: palette.border + alpha.edge,
+    ...interactionSurface(palette, state, { base: tint ?? palette.surface }),
+  };
+}
+
+/** A bordered tile with its icon over its label: a few actions of equal weight, side by side. */
+export function ActionTile({ icon: Icon, label, onPress }: { icon: LucideIcon; label: string; onPress: () => void }) {
+  const { palette } = useTheme();
+  return (
+    <Press
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={(state) => ({ ...tileBox(palette, state), alignItems: "center", gap: spacing.sm })}
+    >
+      <Icon accessible={false} size={iconSize.tile} color={palette.accentText} strokeWidth={iconStroke.quiet} />
+      <Text style={[type.small, { color: palette.accentText, fontFamily: font.medium, textAlign: "center" }]}>{label}</Text>
+    </Press>
+  );
+}
+
+/** A count over its name in the tint of its state, which opens the list it counts. */
+export function CountTile({ count, label, tone, onPress }: { count: number; label: string; tone: "error" | "warning" | "neutral"; onPress: () => void }) {
+  const { palette } = useTheme();
+  const look =
+    tone === "neutral"
+      ? { background: palette.surfaceAlt, figure: palette.textStrong, name: palette.textSecondary }
+      : { background: palette[tone] + alpha.noticeTint, figure: tone === "error" ? palette.errorText : palette.warningText, name: tone === "error" ? palette.errorText : palette.warningText };
+  return (
+    <Press
+      accessibilityRole="button"
+      accessibilityLabel={tr.common.withDetail(label, String(count))}
+      onPress={onPress}
+      style={(state) => ({ ...tileBox(palette, state, look.background), gap: offset.tight })}
+    >
+      <Text style={[type.heading, { color: look.figure }]}>{count}</Text>
+      <Text style={[type.small, { color: look.name }]}>{label}</Text>
+    </Press>
+  );
+}
+
+/** An empty section's card: one plain sentence, and the way to add what it lacks. */
+export function AddPrompt({ text, label, onPress }: { text: string; label: string; onPress: () => void }) {
+  return (
+    <Card>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Body muted>{text}</Body>
+        </View>
+        <Button label={label} icon={Plus} variant="secondary" size="sm" onPress={onPress} />
+      </View>
+    </Card>
+  );
+}
+
+/** A small card that opens a screen — its mark, a name, a line — two to a row where a full row would be mostly empty. */
+export function CompactCard({ icon, title, subtitle, onPress }: { icon: LucideIcon; title: string; subtitle: string; onPress: () => void }) {
+  const { palette } = useTheme();
+  return (
+    <Press
+      accessibilityRole="button"
+      accessibilityLabel={tr.common.withDetail(title, subtitle)}
+      onPress={onPress}
+      style={(state) => ({ ...cardEdge(palette), flex: 1, flexBasis: 0, minWidth: 0, flexDirection: "row", alignItems: "flex-start", gap: spacing.md, ...interactionSurface(palette, state, { base: palette.surface }) })}
+    >
+      <Mark icon={icon} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[type.body, { color: palette.textStrong, fontFamily: font.semibold }]}>{title}</Text>
+        <Text style={[type.small, { color: palette.textSecondary, marginTop: offset.hair }]}>{subtitle}</Text>
+      </View>
+    </Press>
   );
 }
 

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const device = vi.hoisted(() => ({
   os: "ios",
-  files: [] as { at: string; name: string; created?: unknown; written?: [string, unknown] }[],
+  files: [] as { at: string; name: string; created?: unknown; written?: Uint8Array[]; closed?: boolean }[],
   shared: [] as [string, unknown][],
   blobs: [] as Blob[],
   revoked: [] as string[],
@@ -33,14 +33,21 @@ vi.mock("expo-file-system", () => ({
     create(options: unknown) {
       this.entry.created = options;
     }
-    write(data: string, options: unknown) {
-      this.entry.written = [data, options];
+    open() {
+      const written: Uint8Array[] = (this.entry.written = []);
+      return {
+        writeBytes: (chunk: Uint8Array) => {
+          if (chunk.length === 0) throw new Error("disk full");
+          written.push(chunk);
+        },
+        close: () => void (this.entry.closed = true),
+      };
     }
   },
 }));
 vi.mock("expo-sharing", () => ({ shareAsync: async (uri: string, options: unknown) => void device.shared.push([uri, options]) }));
 
-const { openingTab, shareDocument, showPdf } = await import("../../src/services/document-file");
+const { openingTab, shareDocument, shareWritten, showPdf } = await import("../../src/services/document-file");
 
 const PDF = Buffer.from("%PDF-1.7 reçete").toString("base64");
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64");
@@ -73,7 +80,7 @@ describe("on a phone", () => {
     expect(openingTab()).toBeNull();
     expect(device.opened).toEqual([]);
     await showPdf(null, PDF, "Reçete: Ocak/2026");
-    expect(device.files).toEqual([{ at: "cache:", name: "Reçete- Ocak-2026.pdf", created: { overwrite: true }, written: [PDF, { encoding: "base64" }] }]);
+    expect(device.files).toEqual([{ at: "cache:", name: "Reçete- Ocak-2026.pdf", created: { overwrite: true }, written: [new Uint8Array(Buffer.from(PDF, "base64"))], closed: true }]);
     expect(device.shared).toEqual([["cache:/Reçete- Ocak-2026.pdf", { mimeType: "application/pdf", UTI: "com.adobe.pdf", dialogTitle: "Reçete: Ocak/2026" }]]);
   });
 
@@ -83,6 +90,19 @@ describe("on a phone", () => {
     await shareDocument(PDF, "pdf", "a".repeat(80));
     expect(device.files.map((file) => file.name)).toEqual(["--------.jpg", "belge.jpg", `${"a".repeat(60)}.pdf`]);
     expect(device.shared[0]![1]).toEqual({ mimeType: "image/jpeg", UTI: "public.jpeg", dialogTitle: ' *?"<>|\n\r ' });
+  });
+
+  it("writes a backup a chunk at a time, lets the file go, and shares nothing a failed write left", async () => {
+    await shareWritten("zip", "Yedek", async (put) => {
+      await put(new Uint8Array([1]));
+      await put(new Uint8Array([2, 3]));
+    });
+    expect(device.files[0]).toMatchObject({ name: "Yedek.zip", written: [new Uint8Array([1]), new Uint8Array([2, 3])], closed: true });
+    expect(device.shared).toEqual([["cache:/Yedek.zip", { mimeType: "application/zip", UTI: "public.zip-archive", dialogTitle: "Yedek" }]]);
+
+    await expect(shareWritten("zip", "Yedek", (put) => put(new Uint8Array()))).rejects.toThrow("disk full");
+    expect(device.files[1]!.closed).toBe(true);
+    expect(device.shared).toHaveLength(1);
   });
 });
 
@@ -121,5 +141,15 @@ describe("in a browser", () => {
     ]);
     expect(device.blobs.map((blob) => blob.type)).toEqual(["application/pdf", "image/jpeg"]);
     expect(device.shared).toEqual([]);
+  });
+
+  it("downloads a backup's chunks as one file", async () => {
+    await shareWritten("zip", "Yedek", async (put) => {
+      await put(new Uint8Array([1]));
+      await put(new Uint8Array([2, 3]));
+    });
+    expect(device.clicked).toEqual([{ tag: "a", href: "blob:1", download: "Yedek.zip" }]);
+    expect(device.blobs[0]!.type).toBe("application/zip");
+    expect([...new Uint8Array(await device.blobs[0]!.arrayBuffer())]).toEqual([1, 2, 3]);
   });
 });

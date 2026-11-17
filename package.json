@@ -1,6 +1,6 @@
 {
   "name": "fiala",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "main": "expo-router/entry",
   "license": "UNLICENSED",
   "private": true,
@@ -53,6 +53,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.63.0",
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",

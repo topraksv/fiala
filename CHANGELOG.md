@@ -8,6 +8,21 @@ Notlar kısa tutulur: ne değişti, tek cümle. Sebebi ve ölçümü commit'te.
 `scripts/release-notes.mjs` bir bölümü etiketinin GitHub sürüm notuna çevirir;
 bölümü olmayan sürüm yayımlanamaz.
 
+## 0.3.0
+
+### Minor Changes
+
+- Yeni "Geçmiş ve Raporlar" sayfası: hangi kutunun ne zaman eklendiği, kullanıldığı, düzenlendiği ve bittiği süzülerek görülüyor; SKT'si yaklaşan, geçen, bilgisi eksik kutular sayılıyor ve seçilen ilaçlar doktor ya da eczacıyla düz metin olarak paylaşılabiliyor.
+- Bir belge hanenin tamamı yerine yalnız seçilen kişilere gösterilebiliyor.
+- Yedek artık belgeleri ve fotoğrafları da içeriyor; başka bir hesabın yedeği de geri yüklenebiliyor.
+- Görünüm yenilendi: renkli ikon kutuları, SKT durum etiketleri, kalan miktar çubuğu, Durum'da sayaçlar ve tek dokunuşla süzen düğmeler.
+
+### Patch Changes
+
+- Bulutun kalıcı olarak kabul etmediği bir fotoğraf ya da belge artık eşitlemeyi ve çıkışı bekletmiyor; "Bekleyen Kayıtlar"da görünüyor.
+- Hesap silindikten sonra başka bir cihazın yüklediği fotoğraf ve belgeler de buluttan en geç bir gün içinde siliniyor.
+- Ekran okuyucu ve tablet düzeni bütün sayfalarda tarandı; bulunan sorun yok, tarama her sürümde yineleniyor.
+
 ## 0.2.3
 
 ### Patch Changes

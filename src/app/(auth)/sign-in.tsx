@@ -335,6 +335,8 @@ export default function SignInScreen() {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  // `busy` lands with the next render; a second tap before it would start a second request, and could open the takeover dialog twice.
+  const working = useRef(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [consented, setConsented] = useState(false);
   /** Only after a refused press: the form does not scold while it is being filled. */
@@ -350,10 +352,12 @@ export default function SignInScreen() {
   const formReady = readyWith(code);
 
   const submit = async (typedCode = code) => {
-    if (!readyWith(typedCode) || (mode === "signUp" && !consented)) return;
+    if (working.current || !readyWith(typedCode) || (mode === "signUp" && !consented)) return;
+    working.current = true;
     setBusy(true);
     setOutcome(null);
     const answered = await attempt(mode, email.trim(), password, typedCode).catch((): { outcome: Outcome; next?: Mode } => ({ outcome: { tone: "error", text: tr.auth.errGeneric } }));
+    working.current = false;
     setBusy(false);
     setOutcome(answered.outcome);
     if (answered.next) {
@@ -370,9 +374,12 @@ export default function SignInScreen() {
     if (mode === "confirm" && codeReady(typed)) void submit(typed);
   };
   const resend = async () => {
+    if (working.current) return;
+    working.current = true;
     setBusy(true);
     const { resendSignUpCode, requestPasswordReset } = useSession.getState();
     const error = await (mode === "confirm" ? resendSignUpCode : requestPasswordReset)(email.trim()).catch(() => tr.auth.errGeneric);
+    working.current = false;
     setBusy(false);
     setCode("");
     setOutcome(error ? { tone: "error", text: error } : { tone: "success", text: tr.auth.codeResent });

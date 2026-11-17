@@ -29,9 +29,9 @@ const NAMED = [...PHOTO_TABLES].map((table) => `SELECT photo_id FROM ${table} WH
 /** Photos Storage answered for with no file, not asked again until the next launch. */
 const unavailable = new Set<string>();
 /**
- * Photos and document files Storage refused for good, by id, not offered
- * again until the next launch. The row's screen says so (F7.10): it stays on
- * this device alone, and nothing else would tell.
+ * Photos and document files Storage refused for good, by id, while this
+ * launch runs. The row's screen says so (F7.10); "Bekleyen Kayıtlar" keeps
+ * the clue across launches (`setAside`).
  */
 const refused = new Set<string>();
 const heard = new Set<() => void>();
@@ -39,6 +39,70 @@ const heard = new Set<() => void>();
 export function refuse(id: string): void {
   refused.add(id);
   for (const listener of heard) listener();
+}
+
+function unrefuse(id: string): void {
+  refused.delete(id);
+  for (const listener of heard) listener();
+}
+
+/** The local tables holding a file's bytes; a refused one's clue names its table. */
+export type FileTable = "photos" | "document_files";
+
+/**
+ * A file Storage refused for good waits aside as a refused row does, under
+ * "Bekleyen Kayıtlar": counted there and not as unsent, never offered again
+ * until that screen retries it, and given up there. Its clue's `outbox_id` is
+ * below zero, since no outbox event made it, and unique as the column asks.
+ */
+export const aside = (table: FileTable) => `SELECT row_id FROM sync_dead_letters WHERE table_name = '${table}'`;
+
+export async function setAside(table: FileTable, id: string, subject: string | null): Promise<void> {
+  refuse(id);
+  const sqlite = await getSqliteAsync();
+  await sqlite.runAsync(
+    `INSERT INTO sync_dead_letters (outbox_id, table_name, row_id, payload, reason, quarantined_at)
+     SELECT * FROM (SELECT MIN(0, COALESCE(MIN(outbox_id), 0)) - 1, ?, ?, ?, 'refused', ? FROM sync_dead_letters)
+      WHERE NOT EXISTS (SELECT 1 FROM sync_dead_letters WHERE table_name = ? AND row_id = ?)`,
+    [table, id, JSON.stringify(subject == null ? {} : { name: subject }), nowIso(), table, id],
+  );
+}
+
+/**
+ * A clue whose file no live row names, or that Storage holds after all, asks
+ * the person about nothing, yet would keep sign-out waiting on it. `named` is
+ * the ids a live row names.
+ */
+export async function forgetStaleClues(table: FileTable, named: string): Promise<void> {
+  const sqlite = await getSqliteAsync();
+  await sqlite.runAsync(
+    `DELETE FROM sync_dead_letters WHERE table_name = ?
+       AND row_id NOT IN (SELECT id FROM ${table} WHERE uploaded_at IS NULL AND id IN (${named}))`,
+    [table],
+  );
+}
+
+/** A relaunch empties `refused`; the clues still waiting say which rows to mark again. */
+export async function rememberRefused(): Promise<void> {
+  const sqlite = await getSqliteAsync();
+  const letters = await sqlite.getAllAsync<{ row_id: string }>(
+    "SELECT row_id FROM sync_dead_letters WHERE table_name IN ('photos', 'document_files')",
+  );
+  for (const { row_id } of letters) refuse(row_id);
+}
+
+/** Retried from "Bekleyen Kayıtlar": false when the device no longer holds it. The next sync offers it again. */
+export async function offerAgain(table: FileTable, id: string): Promise<boolean> {
+  const sqlite = await getSqliteAsync();
+  if (!(await sqlite.getFirstAsync(`SELECT 1 FROM ${table} WHERE id = ?`, [id]))) return false;
+  unrefuse(id);
+  return true;
+}
+
+/** Given up from "Bekleyen Kayıtlar": kept on this device and never offered again, as a dismissed row is never resent. */
+export async function giveUp(table: FileTable, id: string): Promise<void> {
+  const sqlite = await getSqliteAsync();
+  await sqlite.runAsync(`UPDATE ${table} SET uploaded_at = ? WHERE id = ? AND uploaded_at IS NULL`, [nowIso(), id]);
 }
 
 export const refusedFiles = {
@@ -117,21 +181,29 @@ async function sendPhoto(supabase: SupabaseClient, photo: { id: string; data: st
  */
 export async function sendPendingPhotos(supabase: SupabaseClient, signal: AbortSignal): Promise<void> {
   const sqlite = await getSqliteAsync();
+  await forgetStaleClues("photos", NAMED);
   const pending = await sqlite.getAllAsync<{ id: string; data: string; thumb: string }>(
-    `SELECT id, data, thumb FROM photos WHERE uploaded_at IS NULL AND id IN (${NAMED})`,
+    `SELECT id, data, thumb FROM photos WHERE uploaded_at IS NULL AND id IN (${NAMED}) AND id NOT IN (${aside("photos")})`,
   );
   // Every id here is the device's own, or one a fetch below checked.
   for (const photo of pending) {
-    if (refused.has(photo.id)) continue;
     if (await sendPhoto(supabase, photo, signal)) await sqlite.runAsync("UPDATE photos SET uploaded_at = ? WHERE id = ?", [nowIso(), photo.id]);
-    else refuse(photo.id);
+    else {
+      const named = await sqlite.getFirstAsync<{ name: string }>(SUBJECT, [photo.id, photo.id]);
+      await setAside("photos", photo.id, named?.name ?? null);
+    }
   }
 }
 
-/** Photos a live row names that Storage does not have: this device holds the only copy. */
+/** The name of a live person or medicine showing the photo, so the screen can say whose it is. */
+const SUBJECT = "SELECT name FROM people WHERE photo_id = ? AND deleted_at IS NULL UNION ALL SELECT name FROM products WHERE photo_id = ? AND deleted_at IS NULL";
+
+/** Photos a live row names that Storage does not have, and none waits aside: this device holds the only copy. */
 export async function unsentPhotoCount(): Promise<number> {
   const sqlite = await getSqliteAsync();
-  return (await sqlite.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM photos WHERE uploaded_at IS NULL AND id IN (${NAMED})`))!.n;
+  return (await sqlite.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM photos WHERE uploaded_at IS NULL AND id IN (${NAMED}) AND id NOT IN (${aside("photos")})`,
+  ))!.n;
 }
 
 async function download(supabase: SupabaseClient, path: string): Promise<string | null> {

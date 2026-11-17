@@ -5,7 +5,7 @@ begin;
 set local role postgres;
 set local search_path = extensions, public, pg_catalog;
 
-select extensions.plan(10);
+select extensions.plan(12);
 
 -- SQLSTATE, not message text, under whichever role is active.
 create function pg_temp.exec_sqlstate(command text)
@@ -60,6 +60,26 @@ select is(
   (select count(*) from pg_proc where oid = 'public.delete_own_account()'::regprocedure and not prosecdef),
   1::bigint,
   'the function a client calls runs as the caller'
+);
+
+-- The sweep (migration 24) names what A uploaded, photo and document alike,
+-- and nothing of B's or of no one's: what a signed-in device sent after the
+-- deletion is freed through the Storage API from there.
+insert into storage.objects (bucket_id, name, owner_id) values
+  ('photos', 'f1000000-0000-7000-8000-00000000000f/full.jpg', '10000000-0000-4000-8000-000000000001'),
+  ('documents', 'd1000000-0000-7000-8000-00000000000d/file.pdf', '10000000-0000-4000-8000-000000000001'),
+  ('photos', 'f2000000-0000-7000-8000-00000000000f/full.jpg', '20000000-0000-4000-8000-000000000002'),
+  ('photos', 'f3000000-0000-7000-8000-00000000000f/full.jpg', null);
+select is(
+  array(select bucket_id || ':' || name from public.swept_objects()),
+  array['documents:d1000000-0000-7000-8000-00000000000d/file.pdf', 'photos:f1000000-0000-7000-8000-00000000000f/full.jpg'],
+  'the sweep names the deleted account''s files, and no other'
+);
+select ok(
+  has_function_privilege('service_role', 'public.swept_objects()', 'EXECUTE')
+    and not has_function_privilege('anon', 'public.swept_objects()', 'EXECUTE')
+    and not has_function_privilege('authenticated', 'public.swept_objects()', 'EXECUTE'),
+  'only the server role may ask what the sweep removes'
 );
 
 select * from extensions.finish();

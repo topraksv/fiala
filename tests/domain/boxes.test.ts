@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { tr } from "../../src/i18n/tr";
 import {
   AMOUNT_MAX_MILLI,
   BOX_VIEWS,
@@ -13,11 +14,19 @@ import {
   expiryState,
   foldName,
   formatAmount,
+  filterHistory,
+  HISTORY_KINDS,
+  HISTORY_SPANS,
   formatDay,
+  groupByDay,
+  historyKind,
   inView,
+  leftCounts,
   lastOpenDay,
   localDay,
   matchesSearch,
+  missingInfo,
+  remainingByUnit,
   sameSubstanceHeld,
   nearly,
   TYPO_FROM,
@@ -29,7 +38,10 @@ import {
   readBoxCode,
   sortProducts,
   type BoxFacts,
+  type HistoryEntry,
+  type HistoryFilter,
   WARN_DAYS_MAX,
+  withinDays,
   type ProductSort,
 } from "../../src/domain/boxes";
 
@@ -372,5 +384,143 @@ describe("a catalogue name split into the form's fields", () => {
     expect(split("Apelto 5 mg Film Kaplı Tablet, 56 adet"), "1,517 of the list's names write the unit small").toEqual(["Apelto", "5 mg", "film kaplı tablet", "56 adet"]);
     expect(split("GEMTU 1000MG/10ML FLAKON"), "each unit apart from its number").toEqual(["Gemtu", "1000 mg/10 ml", "flakon", null]);
     expect(split("UNACEFIN 0,5G FLAKON")).toEqual(["Unacefin", "0,5 g", "flakon", null]);
+  });
+});
+
+describe("the history of the boxes", () => {
+  const today = "2026-11-17";
+  // A stamp on the local clock, as the device writes and reads it.
+  const at = (month: number, day: number, hour = 12, year = 2026) => new Date(year, month - 1, day, hour).toISOString();
+  const entry = (fields: Partial<HistoryEntry> = {}): HistoryEntry => ({ at: at(11, 17), reason: "use", changes: null, productId: "parol", personId: null, locationId: null, ...fields });
+  const NONE: HistoryFilter = { kind: null, productId: null, personId: null, locationId: null, days: null };
+
+  it("tells a use, an addition, an edit and a box leaving the cabinet apart", () => {
+    expect(historyKind(entry({ reason: "use" }))).toBe("use");
+    expect(historyKind(entry({ reason: "initial" }))).toBe("added");
+    expect(historyKind(entry({ reason: "add" }))).toBe("added");
+    expect(historyKind(entry({ reason: "correction" })), "a count is an edit of the amount").toBe("edit");
+    expect(historyKind(entry({ reason: null, changes: { nickname: [null, "Annemin"] } }))).toBe("edit");
+    for (const how of ["archived", "lost", "disposed"]) expect(historyKind(entry({ reason: null, changes: { disposition: [null, how] } })), how).toBe("left");
+    expect(historyKind(entry({ reason: null, changes: { note: [null, "x"], disposition: [null, "lost"] } })), "among other fields").toBe("left");
+    expect(historyKind(entry({ reason: null, changes: { disposition: ["lost", null] } })), "brought back, it left nothing").toBe("edit");
+  });
+
+  it("holds a day to the span's last day and no further, today the first", () => {
+    expect(withinDays(at(11, 17, 0), 7, today)).toBe(true);
+    expect(withinDays(at(11, 11, 0), 7, today), "six days back is the seventh day").toBe(true);
+    expect(withinDays(at(11, 10, 23), 7, today), "seven days back is the eighth").toBe(false);
+    expect(withinDays(at(11, 18), 7, today), "a clock ahead of this one").toBe(true);
+    expect(withinDays(at(11, 18, 0, 2025), 365, today)).toBe(true);
+    expect(withinDays(at(11, 17, 23, 2025), 365, today)).toBe(false);
+  });
+
+  it("keeps what fits every choice, a choice of none taking all", () => {
+    const entries = [
+      entry({ reason: "use", productId: "parol", personId: "ali", locationId: "raf", at: at(11, 17) }),
+      entry({ reason: "initial", productId: "majezik", personId: "ali", locationId: "cantasi", at: at(11, 5) }),
+      entry({ reason: null, changes: { disposition: [null, "lost"] }, productId: "parol", personId: "ayse", locationId: "raf", at: at(8, 1) }),
+      entry({ reason: "correction", productId: "parol", personId: null, locationId: null, at: at(6, 1, 12, 2025) }),
+    ];
+    const kept = (filter: Partial<HistoryFilter>) => filterHistory(entries, { ...NONE, ...filter }, today).map((each) => entries.indexOf(each));
+    expect(kept({})).toEqual([0, 1, 2, 3]);
+    expect(HISTORY_KINDS.map((kind) => kept({ kind })), "use, added, edit, left").toEqual([[0], [1], [3], [2]]);
+    expect(kept({ productId: "parol" })).toEqual([0, 2, 3]);
+    expect(kept({ personId: "ali" })).toEqual([0, 1]);
+    expect(kept({ locationId: "raf" })).toEqual([0, 2]);
+    expect(HISTORY_SPANS.map((days) => kept({ days })), "a week, a month, a year").toEqual([[0], [0, 1], [0, 1, 2]]);
+    expect(kept({ productId: "parol", personId: "ali", days: 30 })).toEqual([0]);
+    expect(kept({ productId: "majezik", locationId: "raf" })).toEqual([]);
+  });
+
+  it("groups the newest-first entries under the local day each falls on", () => {
+    const entries = [entry({ at: at(11, 17, 23) }), entry({ at: at(11, 17, 0) }), entry({ at: at(11, 16, 23) }), entry({ at: at(11, 1, 9) })];
+    const groups = groupByDay(entries);
+    expect(groups.map(({ day, entries: each }) => [day, each.length])).toEqual([
+      ["2026-11-17", 2],
+      ["2026-11-16", 1],
+      ["2026-11-01", 1],
+    ]);
+    expect(groups[0]!.entries).toEqual([entries[0], entries[1]]);
+    expect(groupByDay([])).toEqual([]);
+  });
+
+  it("counts the boxes that left in the last year, by how, and nothing else", () => {
+    const left = (how: string | null, when = at(11, 1)) => ({ at: when, changes: { disposition: [null, how] } as HistoryEntry["changes"] });
+    const entries = [
+      left("archived"),
+      left("archived", at(11, 18, 12, 2025)),
+      left("disposed"),
+      left("lost"),
+      left("lost", at(11, 17, 12, 2025)),
+      left(null),
+      left("somewhere else"),
+      { at: at(11, 1), changes: { nickname: [null, "x"] } as HistoryEntry["changes"] },
+      { at: at(11, 1), changes: null },
+    ];
+    expect(leftCounts(entries, today)).toEqual({ archived: 2, disposed: 1, lost: 1 });
+    expect(leftCounts([], today)).toEqual({ archived: 0, disposed: 0, lost: 0 });
+    expect(leftCounts([left("toString")], today), "a name of the object's own is no way of leaving").toEqual({ archived: 0, disposed: 0, lost: 0 });
+  });
+});
+
+describe("what a medicine and its boxes lack", () => {
+  const facts = (fields: Partial<BoxFacts> = {}): BoxFacts => ({ expiresOn: "2028-01-31", soonDays: null, openedOn: null, useWithinDays: null, lowMilli: null, remainingMilli: 10_000, counted: true, disposition: null, ...fields });
+  const box = (id: string, fields: Partial<BoxFacts> = {}) => ({ id, ...facts(fields) });
+  const product = (id: string, activeSubstance: string | null | undefined, boxes: ReturnType<typeof box>[]) => ({ id, activeSubstance, boxes });
+
+  it("is a box at home with no expiry, and a medicine held with no active substance", () => {
+    const missing = missingInfo(
+      [
+        product("complete", "parasetamol", [box("a")]),
+        product("nosubstance", null, [box("b")]),
+        product("blank", "  ", [box("c")]),
+        product("unsaid", undefined, [box("d")]),
+        product("undated", "ibuprofen", [box("e", { expiresOn: null }), box("f", { expiresOn: null, disposition: "lost" }), box("g")]),
+        product("gone", null, [box("h", { disposition: "disposed" }), box("i", { expiresOn: null, disposition: "archived" })]),
+        product("none", null, []),
+        product("both", null, [box("j", { expiresOn: null }), box("k", { expiresOn: null })]),
+        product("emptied", null, [box("l", { expiresOn: null, remainingMilli: 0 })]),
+        product("emptiedandheld", null, [box("m", { expiresOn: null, remainingMilli: 0 }), box("n")]),
+        product("uncounted", "ibuprofen", [box("o", { expiresOn: null, counted: false, remainingMilli: 0 })]),
+      ],
+    );
+    expect(missing.map(({ product: each, box: found }) => [each.id, found?.id ?? null])).toEqual([
+      ["nosubstance", null],
+      ["blank", null],
+      ["unsaid", null],
+      ["undated", "e"],
+      ["both", null],
+      ["both", "j"],
+      ["both", "k"],
+      ["emptiedandheld", null],
+      ["uncounted", "o"],
+    ]);
+  });
+});
+
+describe("what the boxes at home hold", () => {
+  const box = (unit: string, remainingMilli: number, fields: { counted?: boolean; disposition?: string | null } = {}) => ({ unit, remainingMilli, counted: true, disposition: null, ...fields });
+
+  it("is the sum of those counted, per unit, in the order the units come", () => {
+    expect(remainingByUnit([box("ml", 100_000), box("tablet", 20_000), box("ml", 50_000), box("tablet", 0)])).toEqual([
+      { unit: "ml", milli: 150_000 },
+      { unit: "tablet", milli: 20_000 },
+    ]);
+  });
+
+  it("leaves out a box not counted and one that left, and is none with nothing to sum", () => {
+    expect(remainingByUnit([box("tablet", 0, { counted: false }), box("tablet", 5000, { disposition: "lost" })])).toEqual([]);
+    expect(remainingByUnit([])).toEqual([]);
+  });
+});
+
+describe("the list shared with a doctor or a pharmacist", () => {
+  it("is each medicine's name, active substance, what is left and its doses, under the day it was made", () => {
+    const parol = tr.history.medicine("Parol · 500 mg · Tablet", "parasetamol", tr.doses.amount("12", "tablet"), ["1\u00a0tablet · 08:00, 20:00 · Her gün"]);
+    expect(parol).toBe("Parol · 500 mg · Tablet\nEtken madde: parasetamol\nKalan: 12\u00a0tablet\nDoz planı: 1\u00a0tablet · 08:00, 20:00 · Her gün");
+    const bare = tr.history.medicine("Şurup", null, null, ["2\u00a0ml · 09:00 · Her gün", "1\u00a0ml · 21:00 · Pzt"]);
+    expect(bare).toBe("Şurup\nEtken madde: Girilmedi\nKalan: Girilmedi\nDoz planı: 2\u00a0ml · 09:00 · Her gün; 1\u00a0ml · 21:00 · Pzt");
+    expect(tr.history.medicine("Aspirin", "asetilsalisilik asit", "5", []).split("\n")[3]).toBe("Doz planı: Girilmedi");
+    expect(tr.history.text("17.11.2026", [parol, bare])).toBe(`Fiala — ilaç listem (17.11.2026)\n\n${parol}\n\n${bare}\n\nFiala ile hazırlandı; kişinin kendi girdiği bilgidir.`);
   });
 });

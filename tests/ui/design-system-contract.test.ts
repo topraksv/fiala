@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { sourceFiles } from "../source-corpus";
 import { PERSON_COLORS } from "../../src/db/schema";
 import {
+  alpha,
   composite,
   DEFAULT_PALETTE_ID,
   INTERACTION_ALPHA,
@@ -119,6 +120,14 @@ describe.each(schemes)("%s", (_, p) => {
     ["onSecondary", "secondary"],
   ] as const)("%s on %s reaches 4.5:1", (fg, bg) => {
     expect(contrast(p[fg], p[bg])).toBeGreaterThanOrEqual(TEXT);
+  });
+
+  // A status pill and a count tile: the status's own text on that status's tint over a card.
+  it.each([
+    ["errorText", "error"],
+    ["warningText", "warning"],
+  ] as const)("%s on the tint of %s over a card reaches 4.5:1", (fg, tone) => {
+    expect(contrast(p[fg], composite(p.surface, p[tone], Number.parseInt(alpha.noticeTint, 16) / 255))).toBeGreaterThanOrEqual(TEXT);
   });
 
   it.each([

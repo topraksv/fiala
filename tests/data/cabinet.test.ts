@@ -415,7 +415,7 @@ describe("a household's activity", () => {
     await deleteRows("packages", [gone]);
     await addPackage("me", PAROL, { unit: "tablet" }, 1000);
     harness.db!.exec("UPDATE package_moves SET created_by = 'ayse' WHERE quantity_milli = -5000");
-    const activity = await readActivity("ev");
+    const activity = await readActivity(["ev"]);
     expect(activity.map((each) => [each.name, each.reason, each.quantityMilli, each.by, each.changes]), "another cabinet's and a deleted box's left out").toEqual([
       ["Annemin", null, null, null, { nickname: [null, "Annemin"] }],
       ["Annemin", "use", -5000, "ayse", null],
@@ -423,7 +423,35 @@ describe("a household's activity", () => {
     ]);
     expect(activity.every((each) => each.boxId === box && each.unit === "tablet")).toBe(true);
     expect((await readMoves(box)).map((move) => move.createdBy)).toEqual(["ayse", null]);
-    expect(await readActivity("ev", 1), "only as many as asked").toHaveLength(1);
+    expect(await readActivity(["ev"], 1), "only as many as asked").toHaveLength(1);
+  });
+
+  it("reads several cabinets at once, each row saying which and what its box is of and whose and where it is now, and none for no cabinet", async () => {
+    const ali = await addNamed("people", "ev", "Ali");
+    const shelf = await addNamed("locations", "ev", "Raf");
+    const home = await addPackage("ev", PAROL, { unit: "tablet", personId: ali, locationId: shelf }, 20_000);
+    const mine = await addPackage("me", { name: "Majezik" }, { unit: "ml" }, 1000);
+    await addPackage("other", { name: "Aspirin" }, { unit: "tablet" }, 1000);
+    const [{ id: parol }] = all("SELECT id FROM products WHERE name = 'Parol'") as [{ id: string }];
+    const [{ id: majezik }] = all("SELECT id FROM products WHERE name = 'Majezik'") as [{ id: string }];
+    await editBoxes([home], { disposition: "lost" });
+    const both = await readActivity(["ev", "me"]);
+    expect(both.map((each) => [each.cabinetId, each.name, each.boxId, each.productId, each.personId, each.locationId, each.reason]), "the third cabinet's is not read").toEqual([
+      ["ev", "Parol", home, parol, ali, shelf, null],
+      ["me", "Majezik", mine, majezik, null, null, "initial"],
+      ["ev", "Parol", home, parol, ali, shelf, "initial"],
+    ]);
+    expect((await readActivity(["me"])).map((each) => each.cabinetId)).toEqual(["me"]);
+    expect(await readActivity(["ev", "me"], 2), "the limit is of all together").toHaveLength(2);
+    expect(await readActivity([])).toEqual([]);
+  });
+
+  it("leaves out a deleted box's rows from every cabinet read", async () => {
+    const kept = await addPackage("me", PAROL, { unit: "tablet" }, 1000);
+    const gone = await addPackage("ev", { name: "Majezik" }, { unit: "tablet" }, 1000);
+    await editBoxes([gone], { note: "x" });
+    await deleteRows("packages", [gone]);
+    expect((await readActivity(["ev", "me"])).map((each) => each.boxId)).toEqual([kept]);
   });
 });
 

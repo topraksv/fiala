@@ -23,7 +23,7 @@ import Trash from "lucide-react-native/icons/trash";
 import Unlink from "lucide-react-native/icons/unlink";
 
 import { addNamed } from "../../data/cabinet";
-import { archiveDocuments, deleteDocuments, editDocument, linkDocument, movableBy, moveDocument, type CabinetDocument, type DocumentFields } from "../../data/documents";
+import { archiveDocuments, deleteDocuments, editDocument, linkDocument, movableBy, moveDocument, readersOf, type CabinetDocument, type DocumentFields } from "../../data/documents";
 import { useCabinet, useDocuments, useHouseholds, usePeople } from "../../data/hooks";
 import { undoRows } from "../../db/mutations";
 import { formatDay, matchesSearch, parseDay } from "../../domain/boxes";
@@ -35,7 +35,7 @@ import { bytesOf } from "../../sync/photos";
 import { Body, Button, Card, IconButton, ListRow, Missing, Screen, SectionHeader, TextField } from "../../ui/components";
 import { appConfirm, appError, appPrompt } from "../../ui/dialog";
 import { documentTitle, KINDS, LeafletSections, Tiles } from "../../ui/documents";
-import { CabinetChoice, NamedChoices, ViewOnly } from "../../ui/named-choices";
+import { NamedChoices, ViewOnly } from "../../ui/named-choices";
 import { navigateBack } from "../../ui/navigation";
 import { RefusedFile } from "../../ui/photo-field";
 import { PhotoViewer } from "../../ui/photo-viewer";
@@ -347,34 +347,43 @@ function Links({ document, editable }: { document: CabinetDocument; editable: bo
   );
 }
 
+type Audience = "household" | "chosen" | "own";
+
 /**
- * Who sees it (F3.5): the household it is in, or the open one for a document
- * of the person's own. Moved, it is a new row, so the page follows it to its
- * new id, and back on an undo. Only whoever added it moves it out (`movableBy`).
+ * Who sees it (F3.5): the household it is in or the open one, members of it
+ * chosen one by one, or only the person. Any change is a new row (migration
+ * 25), so the page follows it to its new id, and back on an undo. Only
+ * whoever added it changes it (`movableBy`). The person is among the readers
+ * they write, so a document with nobody chosen yet is still theirs to read.
  */
 function Placement({ document }: { document: CabinetDocument }) {
   const router = useRouter();
   const { me, open, households, writes } = useHouseholds();
+  const [choosing, setChoosing] = useState(false);
   const household = households.data.find((each) => each.id === document.cabinetId) ?? (open && writes(open.id) ? open : null);
   if (!me || !household) return null;
+  const others = household.members.filter((member) => member.userId !== me);
+  const readers = document.readers?.split(",") ?? [];
   if (!movableBy(document, me)) {
+    const shown = others.filter((member) => readers.includes(member.userId)).map((member) => member.name || tr.sharing.unnamed);
     return (
       <>
         <SectionHeader>{tr.documents.seenBySection}</SectionHeader>
+        {document.readers ? <Body muted style={{ marginBottom: spacing.sm }}>{tr.documents.shownTo(shown.join(", "))}</Body> : null}
         <Body muted style={{ marginBottom: spacing.md }}>{tr.documents.onlyAdder}</Body>
       </>
     );
   }
   const own = document.cabinetId === me;
+  const audience: Audience = choosing ? "chosen" : own ? "own" : document.readers ? "chosen" : "household";
   const go = (id: string) => router.replace({ pathname: "/document/[id]", params: { id } });
-  const choose = async (toOwn: boolean) => {
-    if (toOwn === own) return;
-    if (!toOwn && !(await appConfirm(tr.documents.shareTitle, tr.documents.shareBody(household.name), tr.documents.shareConfirm))) return;
+  const move = async (cabinetId: string, to: string | null, done: string) => {
     try {
-      const moved = await moveDocument(document.id, toOwn ? me : household.id);
+      const moved = await moveDocument(document.id, cabinetId, to);
       if (!moved) return;
+      setChoosing(false);
       go(moved.id);
-      showUndo(toOwn ? tr.documents.movedPrivate : tr.documents.movedTo(household.name), async () => {
+      showUndo(done, async () => {
         await undoRows(moved.written);
         go(document.id);
       });
@@ -382,5 +391,48 @@ function Placement({ document }: { document: CabinetDocument }) {
       await appError(tr.errors.saveFailed);
     }
   };
-  return <CabinetChoice household={household} own={own} title={tr.documents.seenBySection} onChoose={(toOwn) => void choose(toOwn)} />;
+  const choose = async (next: Audience) => {
+    if (next === audience) return;
+    // Nothing is shown to anyone until someone is ticked, so the tile alone writes nothing.
+    if (next === "chosen") return setChoosing(true);
+    setChoosing(false);
+    if (next === "own") return move(me, null, tr.documents.movedPrivate);
+    if (!(await appConfirm(tr.documents.shareTitle, tr.documents.shareBody(household.name), tr.documents.shareConfirm))) return;
+    return move(household.id, null, tr.documents.movedTo(household.name));
+  };
+  const toggle = (userId: string) => {
+    // Those still in the household: one who left is not carried into the new row.
+    const picked = own ? [] : readers.filter((each) => others.some((member) => member.userId === each));
+    const next = picked.includes(userId) ? picked.filter((each) => each !== userId) : [...picked, userId];
+    // Nobody left to show it to is "only me": kept in the household, only its writer could ever find it again.
+    if (next.length === 0) return void move(me, null, tr.documents.movedPrivate);
+    void move(household.id, readersOf([me, ...next]), tr.documents.readersChanged);
+  };
+  const options: { id: Audience; name: string }[] = [
+    { id: "household", name: household.name },
+    // A household of one has nobody to choose.
+    ...(others.length > 0 ? [{ id: "chosen" as const, name: tr.documents.chosenReaders }] : []),
+    { id: "own", name: tr.households.private },
+  ];
+  return (
+    <>
+      <SectionHeader>{tr.documents.seenBySection}</SectionHeader>
+      <Tiles label={tr.documents.seenBySection} options={options} chosen={audience} onChoose={(next) => void choose(next)} />
+      {audience === "chosen" ? (
+        <>
+          <Body muted style={{ marginBottom: spacing.sm }}>{tr.documents.chosenHint}</Body>
+          <Card rows>
+            {others.map((member) => (
+              <ListRow
+                key={member.userId}
+                title={member.name || tr.sharing.unnamed}
+                selected={!own && !choosing ? readers.includes(member.userId) : false}
+                onPress={() => toggle(member.userId)}
+              />
+            ))}
+          </Card>
+        </>
+      ) : null}
+    </>
+  );
 }

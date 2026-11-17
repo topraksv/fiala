@@ -457,6 +457,11 @@ export interface Activity {
   boxId: string;
   name: string;
   unit: PackageFields["unit"];
+  /** What the box is of, and whose and where it is now, not when this was written. */
+  productId: string;
+  personId: string | null;
+  locationId: string | null;
+  cabinetId: string;
   /** A move's; null for an edit. */
   reason: MoveReason | null;
   quantityMilli: number | null;
@@ -491,17 +496,19 @@ export async function readHouseholdEvents(me: string): Promise<HouseholdEvent[]>
   );
 }
 
-/** A cabinet's latest moves and edits on its live boxes, newest first. */
-export async function readActivity(cabinetId: string, limit = 30): Promise<Activity[]> {
+/** The latest moves and edits on the live boxes of these cabinets, newest first; an empty list reads nothing. */
+export async function readActivity(cabinetIds: readonly string[], limit = 30): Promise<Activity[]> {
   const sqlite = await getSqliteAsync();
   const on = "JOIN packages b ON b.id = h.package_id AND b.deleted_at IS NULL JOIN products p ON p.id = b.product_id";
-  const what = "h.id AS id, h.created_at AS at, h.created_by AS by, h.package_id AS boxId, COALESCE(b.nickname, p.name) AS name, b.unit";
+  const what =
+    "h.id AS id, h.created_at AS at, h.created_by AS by, h.package_id AS boxId, COALESCE(b.nickname, p.name) AS name, b.unit, b.product_id AS productId, b.person_id AS personId, b.location_id AS locationId, h.cabinet_id AS cabinetId";
+  const within = `h.cabinet_id IN (${cabinetIds.map(() => "?").join(", ")}) AND h.deleted_at IS NULL`;
   const rows = await sqlite.getAllAsync<Omit<Activity, "changes"> & { changes: string | null }>(
-    `SELECT ${what}, h.reason, h.quantity_milli AS quantityMilli, NULL AS changes FROM package_moves h ${on} WHERE h.cabinet_id = ? AND h.deleted_at IS NULL
+    `SELECT ${what}, h.reason, h.quantity_milli AS quantityMilli, NULL AS changes FROM package_moves h ${on} WHERE ${within}
      UNION ALL
-     SELECT ${what}, NULL, NULL, h.changes FROM package_changes h ${on} WHERE h.cabinet_id = ? AND h.deleted_at IS NULL
+     SELECT ${what}, NULL, NULL, h.changes FROM package_changes h ${on} WHERE ${within}
      ORDER BY at DESC, id DESC LIMIT ?`,
-    [cabinetId, cabinetId, limit],
+    [...cabinetIds, ...cabinetIds, limit],
   );
   return rows.map((row) => ({ ...row, changes: JSON.parse(row.changes ?? "null") as BoxChange["changes"] | null }));
 }

@@ -27,9 +27,9 @@ import { useCabinet, useDocuments, useHouseholds, useLocations, usePeople, useSe
 import { giveHealthConsent, hasHealthConsent } from "../data/settings";
 import { formatDay, localDay } from "../domain/boxes";
 import { tr } from "../i18n/tr";
-import { shareDocument } from "../services/document-file";
-import { buildBackupText, inventoryGrid, MAX_BACKUP_BYTES, PERSONAL_COLUMNS, readBackup, restoreBackup, workbookBytes, type PersonalColumn } from "../services/export-import";
-import { readPickedText, UserFacingError } from "../services/picked-file";
+import { shareDocument, shareWritten } from "../services/document-file";
+import { inventoryGrid, MAX_BACKUP_BYTES, PERSONAL_COLUMNS, readBackup, restoreArchive, restoreBackup, workbookBytes, writeBackupArchive, type Backup as BackupFile, type PersonalColumn } from "../services/export-import";
+import { pickedChunks, readPickedText, UserFacingError } from "../services/picked-file";
 import { syncNow } from "../sync/engine";
 import { base64Of } from "../sync/photos";
 import { Body, Button, Card, ListRow, Screen, SectionHeader, ToggleRow } from "../ui/components";
@@ -105,15 +105,16 @@ function Backup() {
   const backup = async () => {
     if (!me) return;
     setBusy("backup");
-    await buildBackupText(me)
-      .then((text) => shareDocument(base64Of(new TextEncoder().encode(text)), "json", tr.backup.fileName(localDay())))
+    let missing = 0;
+    await shareWritten("zip", tr.backup.fileName(localDay()), async (put) => void ({ missing } = await writeBackupArchive(me, put)))
+      .then(() => missing > 0 && showNotice(tr.dataPrivacy.backupMissing(missing)))
       .catch((error: unknown) => appError(said(error, tr.errors.shareFailed)));
     setBusy(null);
   };
 
   const restore = async () => {
     if (!me) return;
-    const picked = await DocumentPicker.getDocumentAsync({ type: ["application/json", "text/plain"], copyToCacheDirectory: true }).catch(() => null);
+    const picked = await DocumentPicker.getDocumentAsync({ type: ["application/zip", "application/x-zip-compressed", "application/json", "text/plain"], copyToCacheDirectory: true }).catch(() => null);
     const asset = picked && !picked.canceled ? picked.assets[0] : null;
     if (!asset) return;
     setBusy("restore");
@@ -121,17 +122,31 @@ function Backup() {
     setBusy(null);
   };
 
-  /** Read, confirmed, consented to, then written; any refusal on the way is said by the caller. */
+  /** Confirmed and consented to; what a backup holds is health data, as a box added by hand is. */
+  const accept = async (file: BackupFile) => {
+    if (!(await appConfirm(tr.dataPrivacy.restoreTitle, tr.dataPrivacy.restoreBody(formatDay(localDay(new Date(file.exportedAt)))), tr.dataPrivacy.restoreConfirm))) return false;
+    if (hasHealthConsent(settings.data)) return true;
+    if (!(await appConfirm(tr.addBox.consentTitle, tr.addBox.consentBody, tr.addBox.consentConfirm))) return false;
+    await giveHealthConsent();
+    return true;
+  };
+
+  /** An archive with its files (F4.10), or a JSON backup an earlier version wrote; any refusal on the way is said by the caller. */
   const restoreFrom = async (asset: DocumentPicker.DocumentPickerAsset) => {
-    const file = readBackup(await readPickedText(asset, MAX_BACKUP_BYTES, tr.backup.tooLarge, tr.backup.notUtf8));
-    if (!(await appConfirm(tr.dataPrivacy.restoreTitle, tr.dataPrivacy.restoreBody(formatDay(localDay(new Date(file.exportedAt)))), tr.dataPrivacy.restoreConfirm))) return;
-    // What a backup holds is health data, as a box added by hand is.
-    if (!hasHealthConsent(settings.data)) {
-      if (!(await appConfirm(tr.addBox.consentTitle, tr.addBox.consentBody, tr.addBox.consentConfirm))) return;
-      await giveHealthConsent();
+    if (/\.zip$/i.test(asset.name) || /zip/.test(asset.mimeType ?? "")) {
+      const chunks = await pickedChunks(asset);
+      try {
+        const done = await restoreArchive(me!, chunks.next, accept, () => syncNow(me!));
+        if (done) showNotice(tr.dataPrivacy.restored(done.restored, done.kept, done.closed, done.files, done.skipped, done.damaged));
+      } finally {
+        chunks.close();
+      }
+      return;
     }
+    const file = readBackup(await readPickedText(asset, MAX_BACKUP_BYTES, tr.backup.tooLarge, tr.backup.notUtf8));
+    if (!(await accept(file))) return;
     const done = await restoreBackup(me!, file, () => syncNow(me!));
-    showNotice(tr.dataPrivacy.restored(done.restored, done.kept, done.closed));
+    showNotice(tr.dataPrivacy.restored(done.restored, done.kept, done.closed, 0, 0));
   };
 
   return (

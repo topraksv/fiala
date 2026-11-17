@@ -7,6 +7,7 @@ import { asc, eq } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { findRow, fromDbShape, writeRows } from "../db/mutations";
 import { SYNCED_TABLES, syncDeadLetters, type SyncedTableName } from "../db/schema";
+import { giveUp, offerAgain, type FileTable } from "./photos";
 
 export type DeadLetter = Pick<typeof syncDeadLetters.$inferSelect, "id" | "tableName" | "rowId" | "reason" | "quarantinedAt"> & {
   /** The row as the person would know it — a setting's key — when it has one. */
@@ -16,7 +17,7 @@ export type DeadLetter = Pick<typeof syncDeadLetters.$inferSelect, "id" | "table
 function subjectOf(payload: string): string | null {
   try {
     const row = JSON.parse(payload) as Record<string, unknown>;
-    const subject = row.key;
+    const subject = row.key ?? row.name;
     return typeof subject === "string" ? subject : null;
   } catch {
     return null;
@@ -36,6 +37,11 @@ export async function readDeadLetters(): Promise<DeadLetter[]> {
  */
 export async function retryDeadLetter(id: number): Promise<"requeued" | "missing"> {
   const [letter] = await getDb().select().from(syncDeadLetters).where(eq(syncDeadLetters.id, id));
+  if (letter && isFileTable(letter.tableName)) {
+    if (!(await offerAgain(letter.tableName, letter.rowId))) return "missing";
+    await getDb().delete(syncDeadLetters).where(eq(syncDeadLetters.id, id));
+    return "requeued";
+  }
   if (!letter || !Object.hasOwn(SYNCED_TABLES, letter.tableName)) return "missing";
   const table = letter.tableName as SyncedTableName;
   const current = await findRow(table, letter.rowId);
@@ -45,7 +51,11 @@ export async function retryDeadLetter(id: number): Promise<"requeued" | "missing
   return "requeued";
 }
 
-/** Forget the clue; the row it names stays on the device as it is. */
+/** Forget the clue; the row it names stays on the device as it is, and a file is never offered again. */
 export async function dismissDeadLetter(id: number): Promise<void> {
+  const [letter] = await getDb().select().from(syncDeadLetters).where(eq(syncDeadLetters.id, id));
+  if (letter && isFileTable(letter.tableName)) await giveUp(letter.tableName, letter.rowId);
   await getDb().delete(syncDeadLetters).where(eq(syncDeadLetters.id, id));
 }
+
+const isFileTable = (table: string): table is FileTable => table === "photos" || table === "document_files";
