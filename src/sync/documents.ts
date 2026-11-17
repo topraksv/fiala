@@ -46,6 +46,12 @@ export async function sendPendingDocuments(supabase: SupabaseClient, signal: Abo
   }
 }
 
+/** Files a live row names that Storage does not have: this device holds the only copy. */
+export async function unsentDocumentCount(): Promise<number> {
+  const sqlite = await getSqliteAsync();
+  return (await sqlite.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM document_files WHERE uploaded_at IS NULL AND id IN (${NAMED})`))!.n;
+}
+
 /**
  * A document's file, from the device or else from Storage, kept here once
  * fetched; `null` when neither has it for this person, or it is not the type

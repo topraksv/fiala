@@ -50,9 +50,9 @@ const { migrateDb } = await import("../../src/db/migrate");
 const { deterministicId, naturalKeys } = await import("../../src/db/ids");
 const { addPackage, openHousehold, readCabinet, remainingMilli, setPhoto, takeFrom } = await import("../../src/data/cabinet");
 const { readPhoto } = await import("../../src/data/photos");
-const { purgeOwnPhotos } = await import("../../src/sync/photos");
+const { purgeOwnPhotos, unsentPhotoCount } = await import("../../src/sync/photos");
 const { addDocument, moveDocument, readDocuments } = await import("../../src/data/documents");
-const { fetchDocumentFile, purgeOwnDocuments } = await import("../../src/sync/documents");
+const { fetchDocumentFile, purgeOwnDocuments, unsentDocumentCount } = await import("../../src/sync/documents");
 const { addDosePlan, answerDose, readDoseAnswers, readDosePlans } = await import("../../src/data/doses");
 const { acceptInvite, answerOffer, cancelInvites, createInvite, offerCabinet, peekInvite, useOffers } = await import("../../src/sync/sharing");
 
@@ -280,7 +280,7 @@ describe("what the server will not take", () => {
       await put("big", TOO_LONG);
       expect(await sync()).toBe(true);
       expect(cloud.rows("settings").map((row) => row.key)).toEqual(["greeting"]);
-      expect(await pendingOutboxCount()).toBe(0);
+      expect(await pendingOutboxCount(), "set aside, it is still nowhere but here").toBe(1);
       expect(await readDeadLetters(), "named as the person knows it").toMatchObject([{ tableName: "settings", reason: "refused", subject: "big" }]);
       expect(useSyncStatus.getState()).toMatchObject({ state: "attention", error: null });
     });
@@ -396,7 +396,7 @@ describe("what the server will not take", () => {
       cloud.failures.push({ message: 'new row violates row-level security policy for table "settings"', code: "42501" });
       expect(await sync()).toBe(true);
       expect(await readDeadLetters(), "refused alone, so set aside alone").toMatchObject([{ reason: "refused" }]);
-      expect(await pendingOutboxCount()).toBe(0);
+      expect(await pendingOutboxCount(), "and still counted: it is nowhere but here").toBe(1);
     });
   });
 
@@ -722,11 +722,25 @@ describe("the session", () => {
     });
   });
 
-  it("flushes the outbox without pulling, for a sign-out", async () => {
+  it("flushes the outbox without pulling, for a sign-out, and sends a photo and a file their rows went up without", async () => {
     await on("A", async () => {
+      await boxWithPhoto();
+      await addDocument(
+        signedIn,
+        { kind: "prescription", title: "Reçete", personId: null, issuedOn: null, note: null, reference: null },
+        { base64: Buffer.from("%PDF-1.7 reçete").toString("base64"), type: "pdf" },
+      );
+      await sync();
+      // As a purge that removed them leaves each: named by a row the server holds, and unsent.
+      devices.A.exec("UPDATE photos SET uploaded_at = NULL; UPDATE document_files SET uploaded_at = NULL");
+      cloud.objects.clear();
+      cloud.documentObjects.clear();
+      cloud.requests.length = 0;
       await put("greeting", "merhaba");
+      expect([await unsentPhotoCount(), await unsentDocumentCount()]).toEqual([1, 1]);
       await flushOutbox(USER);
-      expect(await pendingOutboxCount()).toBe(0);
+      expect([await pendingOutboxCount(), await unsentPhotoCount(), await unsentDocumentCount()]).toEqual([0, 0, 0]);
+      expect([cloud.objects.size, cloud.documentObjects.size]).toEqual([2, 1]);
       expect(cloud.requests.filter((request) => request.startsWith("select") || request.startsWith("rpc"))).toEqual([]);
     });
   });
@@ -1256,6 +1270,7 @@ describe("a shared cabinet", () => {
     });
     expect(count(devices.A, "SELECT COUNT(*) AS n FROM sync_dead_letters"), "refused into a deleted household").toBe(1);
     expect(useSyncStatus.getState().state, "kept for the undo, it asks nothing of A").toBe("idle");
+    expect(await on("A", pendingOutboxCount), "nor of a sign-out, which would warn of a row no screen shows").toBe(0);
     await on("C", async () => {
       await undoRows(deleted);
       await sync();

@@ -24,8 +24,8 @@ import { forgetReminderPreferences } from "../services/reminder-preferences";
 import { cancelReminders } from "../services/reminders";
 import { flushOutbox, startSyncSession, stopSyncSession } from "../sync/engine";
 import { createRecoveryClient, getSupabase, subscribeSupabaseAuthEvents } from "../sync/supabase";
-import { purgeOwnDocuments } from "../sync/documents";
-import { purgeOwnPhotos } from "../sync/photos";
+import { purgeOwnDocuments, unsentDocumentCount } from "../sync/documents";
+import { purgeOwnPhotos, unsentPhotoCount } from "../sync/photos";
 import { friendlyAuthError } from "./auth-errors";
 import { deviceName } from "../domain/logins";
 import { deviceId, loadPreviousLogin, recordSuccessfulLogin, startLoginHistory } from "./login-history";
@@ -73,6 +73,8 @@ const signedOut = { userId: null, email: null, previousLoginAt: null } as const;
 /** Catches for the convenience work `claim` describes. */
 const ignore = () => {};
 const absent = () => null;
+/** What only this device holds: writes the server lacks, and photos and files Storage lacks. */
+const unsentCount = async () => (await pendingOutboxCount()) + (await unsentPhotoCount()) + (await unsentDocumentCount());
 
 /** Auth could not be reached, which is not the same as Auth saying no. */
 const unreachable = (error: { name?: string } | null) => error?.name === "AuthRetryableFetchError";
@@ -108,7 +110,7 @@ async function ensureWorkspaceFor(userId: string): Promise<string | null> {
     try {
       // Another account's rows may exist nowhere else yet. The one exception
       // is a deleted account's: nobody is left to send them to.
-      if (owner !== WIPE_PENDING && (await pendingOutboxCount()) > 0) return tr.auth.errOtherAccountPending;
+      if (owner !== WIPE_PENDING && (await unsentCount()) > 0) return tr.auth.errOtherAccountPending;
       await cancelReminders().catch(ignore);
       await forgetReminderPreferences().catch(ignore);
       await forgetGuide().catch(ignore);
@@ -173,7 +175,7 @@ async function closeEndedSession(): Promise<void> {
   await kv.remove(LAST_USER_KEY).catch(ignore);
   await cancelReminders().catch(ignore);
   // A count that fails is not a zero.
-  if ((await pendingOutboxCount().catch(ignore)) === 0) await wipeWorkspace().then(forgetAccount, ignore);
+  if ((await unsentCount().catch(ignore)) === 0) await wipeWorkspace().then(forgetAccount, ignore);
 }
 
 function listenForEndedSessions(): void {
@@ -425,7 +427,7 @@ export const useSession = create<SessionStore>((set, get) => ({
       const userId = get().userId;
       // Send what is waiting first, so the question is asked only about what truly cannot leave.
       if (userId) await flushOutbox(userId);
-      if (!options?.force && (await pendingOutboxCount()) > 0) return SIGN_OUT_PENDING_CHANGES;
+      if (!options?.force && (await unsentCount()) > 0) return SIGN_OUT_PENDING_CHANGES;
       await stopSyncSession();
       const [, wiped] = await Promise.all([cancelReminders().catch(ignore), wipeWorkspace().then(() => true, () => false)]);
       if (!wiped) {

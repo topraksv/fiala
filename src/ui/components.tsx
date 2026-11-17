@@ -914,8 +914,8 @@ export function Button({
  * The pressable box is the 44-point minimum, the chip
  * painted inside it the compact one. Its label is required, because an icon
  * alone says nothing to a screen reader — and a record's control names the
- * record (`docs/UI.md` section 11). `text` writes words beside the icon, for a
- * row that offers several of one action, which the icon alone cannot tell apart.
+ * record. `text` writes words beside the icon, for a row that offers several of
+ * one action, which the icon alone cannot tell apart.
  */
 export function IconButton({
   icon: Icon,

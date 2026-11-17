@@ -8,6 +8,14 @@ Notlar kısa tutulur: ne değişti, tek cümle. Sebebi ve ölçümü commit'te.
 `scripts/release-notes.mjs` bir bölümü etiketinin GitHub sürüm notuna çevirir;
 bölümü olmayan sürüm yayımlanamaz.
 
+## 0.2.2
+
+### Patch Changes
+
+- Çıkış yaparken sunucunun kabul etmediği kayıtlar ile henüz yüklenmemiş fotoğraf ve belgeler için de önce soruluyor; eskiden sorulmadan siliniyorlardı.
+- Çıkıştan önce bekleyen fotoğraf ve belgeler de gönderiliyor.
+- Hesap dondurulamayınca çıkan uyarı, gönderilemeyen kayıtların Ayarlar'da nerede görüleceğini de söylüyor.
+
 ## 0.2.1
 
 ### Patch Changes

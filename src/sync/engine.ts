@@ -15,7 +15,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Constants from "expo-constants";
 import { getSqliteAsync, withTransaction } from "../db/client";
-import { fromDbShape, nowIso, onLocalWrite, writeRows, type RowWrite } from "../db/mutations";
+import { ASKS_THE_PERSON, fromDbShape, nowIso, onLocalWrite, writeRows, type RowWrite } from "../db/mutations";
 import { SYNCED_TABLES, UNPULLED, type SyncedTableName } from "../db/schema";
 import { tr } from "../i18n/tr";
 import { readHouseholds, writes } from "../data/cabinet";
@@ -625,12 +625,9 @@ async function retryAsideAfterUpdate(): Promise<void> {
   await sqlite.runAsync("INSERT INTO sync_state (table_name, last_pulled_at) VALUES (?, ?)", [key, nowIso()]);
 }
 
-/** What asks for the person: a write a deleted household refused waits for its undo, or goes with it a week on, and asks nothing. */
 async function deadLetterCount(): Promise<number> {
   const sqlite = await getSqliteAsync();
-  return (await sqlite.getFirstAsync<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM sync_dead_letters WHERE NOT EXISTS (SELECT 1 FROM cabinets WHERE id = json_extract(payload, '$.cabinet_id') AND deleted_at IS NOT NULL)",
-  ))!.n;
+  return (await sqlite.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM sync_dead_letters WHERE ${ASKS_THE_PERSON}`))!.n;
 }
 
 function clearScheduledSync(): void {
@@ -728,6 +725,9 @@ export async function flushOutbox(userId: string): Promise<void> {
   try {
     await assertSessionIs(supabase, userId);
     await pushOutbox(supabase, userId, token);
+    // A photo or a file whose row went up without it has no outbox event left to carry it.
+    await sendPendingPhotos(supabase, token.signal);
+    await sendPendingDocuments(supabase, token.signal);
   } catch {
     // Counted by the caller.
   }

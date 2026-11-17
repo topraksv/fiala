@@ -1,6 +1,6 @@
 {
   "name": "fiala",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "main": "expo-router/entry",
   "license": "UNLICENSED",
   "private": true,
@@ -94,7 +94,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "overrides": {
-    "node-forge": "1.4.1",
+    "node-forge": "1.4.3",
     "@expo/cli": {
       "zod": "^4.6.6"
     },

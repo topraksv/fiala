@@ -275,10 +275,17 @@ export function undoRows(written: RowsWritten): Promise<void> {
   return revertRows(written, async () => {});
 }
 
-/** Writes this device has made and the server has not yet taken. */
+/** The writes set aside that ask for the person: one a deleted household refused waits for its undo, or goes with it a week on, and asks nothing. */
+export const ASKS_THE_PERSON = "NOT EXISTS (SELECT 1 FROM cabinets WHERE id = json_extract(payload, '$.cabinet_id') AND deleted_at IS NOT NULL)";
+
+/**
+ * Writes the server does not hold: queued, or set aside after it refused them.
+ * A row set aside has left the outbox and reached nobody, so a sign-out that
+ * counted the outbox alone wiped it unasked.
+ */
 export async function pendingOutboxCount(): Promise<number> {
   const sqlite = await getSqliteAsync();
-  return (await sqlite.getFirstAsync<{ n: number }>("SELECT COUNT(*) AS n FROM outbox"))?.n ?? 0;
+  return (await sqlite.getFirstAsync<{ n: number }>(`SELECT (SELECT COUNT(*) FROM outbox) + (SELECT COUNT(*) FROM sync_dead_letters WHERE ${ASKS_THE_PERSON}) AS n`))?.n ?? 0;
 }
 
 /**

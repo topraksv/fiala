@@ -1,10 +1,12 @@
-# Supabase's free plan pauses a project after about seven days without
-# database activity. This heartbeat writes AND reads every three days so the
-# project never pauses, even when nobody opens the app for a month.
+# Supabase's free plan pauses a project whose database saw little activity over
+# seven days; its documentation puts the bar at "a few user requests to the
+# database each day". The heartbeat used to run every third day, two requests a
+# run, and two of the family's projects paused under it. It now runs three
+# times a day and makes four database requests each time.
 #
-# Only status codes are echoed. The response bodies are still asserted against
-# (the read must contain an "id"), but printing them would put PostgREST output
-# into a public Actions log for no diagnostic gain over the status code.
+# Only status codes are echoed: a response body would put PostgREST output into
+# a public Actions log. A paused project's host no longer resolves, so that
+# case is named in the log instead of left as a curl error.
 #
 # GitHub disables a public repository's scheduled workflows after 60 days with
 # no repository activity; docs/RELEASE.md says what to do then.
@@ -12,7 +14,8 @@ name: supabase-keepalive
 
 on:
   schedule:
-    - cron: "0 6 */3 * *" # every 3 days at 06:00 UTC
+    # Off the hour: GitHub delays and sometimes drops schedules queued at :00.
+    - cron: "17 5,13,21 * * *"
   workflow_dispatch: {}
 
 permissions: {}
@@ -20,27 +23,32 @@ permissions: {}
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-      - name: Upsert and read keep_alive row
+      - name: Write and read the keep_alive row
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -euo pipefail
-          write_status=$(curl -sS -o /dev/null -w "%{http_code}" \
-            -X POST "$SUPABASE_URL/rest/v1/keep_alive?on_conflict=id" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Content-Type: application/json" \
-            -H "Prefer: resolution=merge-duplicates" \
+          host=${SUPABASE_URL#https://}
+          if ! getent hosts "${host%%/*}" >/dev/null; then
+            echo "::error::The project's host does not resolve: Supabase has paused it. Restore it from the dashboard (Project > Restore)."
+            exit 1
+          fi
+          call() {
+            curl -sS --retry 2 --max-time 30 -o /tmp/body.json -w "%{http_code}" \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" "$@"
+          }
+          status=$(call -X POST "$SUPABASE_URL/rest/v1/keep_alive?on_conflict=id" \
+            -H "Content-Type: application/json" -H "Prefer: resolution=merge-duplicates" \
             -d "[{\"id\": 1, \"pinged_at\": \"$(date -u +%FT%TZ)\"}]")
-          echo "write: $write_status"
-          [ "$write_status" = "201" ] || [ "$write_status" = "200" ]
-          read_status=$(curl -sS -o /tmp/read.json -w "%{http_code}" \
-            "$SUPABASE_URL/rest/v1/keep_alive?select=id,pinged_at&id=eq.1" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
-          echo "read: $read_status"
-          [ "$read_status" = "200" ]
-          grep -q '"id"' /tmp/read.json
+          echo "write: $status"
+          [ "$status" = "201" ] || [ "$status" = "200" ]
+          for attempt in 1 2 3; do
+            status=$(call "$SUPABASE_URL/rest/v1/keep_alive?select=id,pinged_at&id=eq.1")
+            echo "read $attempt: $status"
+            [ "$status" = "200" ]
+            grep -q '"id"' /tmp/body.json
+          done

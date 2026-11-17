@@ -57,6 +57,7 @@ jobs:
     outputs:
       base: ${{ steps.base.outputs.sha }}
       mutation_base: ${{ steps.base.outputs.mutation }}
+      mutation_shards: ${{ steps.shards.outputs.list }}
       full_gate: ${{ steps.raw.outputs.full_gate }}
       run_web_build: ${{ steps.route.outputs.run_web_build }}
       run_e2e: ${{ steps.raw.outputs.run_e2e }}
@@ -124,6 +125,22 @@ jobs:
           BASE_SHA: ${{ steps.base.outputs.sha }}
           HEAD_SHA: ${{ github.sha }}
         run: node scripts/classify-changes.mjs "$BASE_SHA" "$HEAD_SHA"
+      # One runner per file to mutate, up to the six the gate was measured at.
+      # A fixed six started five runners for a one-file change that cloned the
+      # history and stopped, each a job the family's three repositories queue
+      # behind when they are pushed together.
+      - id: shards
+        name: Open a mutation shard per file to mutate
+        if: steps.raw.outputs.full_gate == 'true'
+        env:
+          MUTATION_BASE_SHA: ${{ steps.base.outputs.mutation }}
+          MUTATION_HEAD_SHA: ${{ github.sha }}
+          MUTATION_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          list=$(node --input-type=module -e 'const { default: config } = await import("./stryker.ci.config.mjs"); console.log(JSON.stringify(Array.from({ length: Math.min(6, Math.max(1, config.mutate.length)) }, (_, i) => i + 1)))')
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+          echo "mutation shards: $list"
       - id: route
         name: Apply an explicit manual target override
         env:
@@ -221,7 +238,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: ${{ fromJSON(needs.classify.outputs.mutation_shards || '[1]') }}
     env:
       # The last run whose mutation passed, so mutation covers every change
       # that has not yet passed it — a failed run's included — and not only
@@ -237,7 +254,7 @@ jobs:
           # The selector diffs from the base; a depth-one checkout cannot.
           fetch-depth: 0
       # A shard dealt no file skips the pass instead of handing Stryker an
-      # empty list, which a change touching one file does to all but one. Asked
+      # empty list: a full gate that changed nothing in scope still opens one. Asked
       # before setup and install: the config imports nothing installed, and the
       # runner's own Node reads it, so an idle shard spends seconds, not the
       # install.
@@ -560,8 +577,10 @@ jobs:
           # `release.yml` says for its own.
           package-manager-cache: false
       # Still needed with the bundles prebuilt: the CLI reads the app config,
-      # and the SDK version and runtime come from the installed `expo`.
-      - run: npm ci
+      # and the SDK version and runtime come from the installed `expo`. That is
+      # all it reads, so the test and build tools stay out, and no install hook
+      # runs in the job that holds the credential next.
+      - run: npm ci --ignore-scripts --omit=dev
       # Expo Go uses the SDK runtime, so there is no binary lookup, build or
       # Apple credential path.
       #

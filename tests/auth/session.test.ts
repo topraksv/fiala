@@ -101,13 +101,15 @@ vi.mock("../../src/sync/engine", () => ({
     harness.db!.exec("DELETE FROM outbox");
   },
 }));
-vi.mock("../../src/sync/photos", () => ({
+vi.mock("../../src/sync/photos", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/sync/photos")>()),
   purgeOwnPhotos: async () => {
     cloud.calls.push("photos:purge");
     if (sync.purgeFails) throw new Error("Failed to fetch");
   },
 }));
-vi.mock("../../src/sync/documents", () => ({
+vi.mock("../../src/sync/documents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/sync/documents")>()),
   purgeOwnDocuments: async () => {
     cloud.calls.push("documents:purge");
   },
@@ -215,6 +217,8 @@ vi.mock("../../src/sync/supabase", () => {
 const { LOCAL_USER_ID, SIGN_OUT_PENDING_CHANGES, useSession } = await import("../../src/auth/session");
 const { VERIFY_COOLDOWN_MS, VERIFY_MAX_FAILURES } = await import("../../src/auth/verification-brake");
 const { frozenFrom, isFrozen, readSettings, setAccountFrozen, writeSetting } = await import("../../src/data/settings");
+const { openHousehold, setPhoto } = await import("../../src/data/cabinet");
+const { addDocument } = await import("../../src/data/documents");
 const { deviceId } = await import("../../src/auth/login-history");
 const { lastLogin } = await import("../../src/domain/logins");
 const { kv: harnessKv } = await import("../../src/services/kv");
@@ -532,6 +536,32 @@ describe("signing out", () => {
     expect(device.cancelled).toBe(1);
     // With the owner mark gone, the next account's sign-in sees no switch to forget them at.
     expect(["fiala.reminders.names", "fiala.guide.starredMedicines"].map((key) => device.stored.has(key)), "A's opt-in and A's stars").toEqual([false, false]);
+  });
+
+  it("asks as well for a write the server set aside, and for a photo or a file Storage never took", async () => {
+    await session().signIn(A.email, A.password);
+    const photo = "data:image/jpeg;base64,AA";
+    const house = await openHousehold(A.id, "Ev");
+    await setPhoto("cabinets", house, { data: photo, thumb: photo });
+    await addDocument(
+      house,
+      { kind: "prescription", title: "Reçete", personId: null, issuedOn: null, note: null, reference: null },
+      { base64: Buffer.from("%PDF-1.7 reçete").toString("base64"), type: "pdf" },
+    );
+    harness.db!.exec(
+      `INSERT INTO sync_dead_letters (outbox_id, table_name, row_id, payload, reason, quarantined_at)
+         SELECT id, table_name, row_id, payload, 'refused', created_at FROM outbox WHERE table_name = 'documents';
+       DELETE FROM outbox`,
+    );
+    expect(await session().signOut(), "refused by the server, the document is nowhere but here").toBe(SIGN_OUT_PENDING_CHANGES);
+    harness.db!.exec("DELETE FROM sync_dead_letters");
+    expect(await session().signOut(), "the rows went up; the photo and the file did not").toBe(SIGN_OUT_PENDING_CHANGES);
+    harness.db!.exec("UPDATE photos SET uploaded_at = '2026-09-27T00:00:00.000Z'");
+    expect(await session().signOut(), "the file alone is still unsent").toBe(SIGN_OUT_PENDING_CHANGES);
+    harness.db!.exec("UPDATE photos SET uploaded_at = NULL; UPDATE document_files SET uploaded_at = '2026-09-27T00:00:00.000Z'");
+    expect(await session().signOut(), "and so is the photo alone").toBe(SIGN_OUT_PENDING_CHANGES);
+    harness.db!.exec("UPDATE photos SET uploaded_at = '2026-09-27T00:00:00.000Z'");
+    expect(await session().signOut()).toBeNull();
   });
 
   it("keeps everything, the account still signed in, when the device cannot be emptied", async () => {

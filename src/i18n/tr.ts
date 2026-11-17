@@ -1257,7 +1257,7 @@ export const tr = {
     freezeBody: "Verilerin silinmez. Bu cihazdan çıkış yapılır; diğer cihazlarında hesap, şifrenle yeniden açılana kadar kilitli kalır. Yeniden giriş yapınca hesabın açılır.",
     freezeConfirm: "Dondur ve Çık",
     freezePasswordBody: "Hesabı dondurmak için şifreni gir.",
-    freezeSyncFailed: "Gönderilmemiş değişiklikler sunucuya ulaşmadı, hesap dondurulmadı. İnternet bağlantını kontrol edip tekrar dene.",
+    freezeSyncFailed: "Gönderilmemiş değişiklikler sunucuya ulaşmadı, hesap dondurulmadı. İnternet bağlantını kontrol edip tekrar dene; sorun sürerse Ayarlar'da \"Bekleyen Kayıtlar\"a bak.",
     freezeRollbackFailed: "Hesap dondurulamadı, ama bu cihazda dondurulmuş görünüyor. Şifrenle yeniden açabilirsin.",
     frozenTitle: "Hesabın donduruldu",
     frozenBody: "Devam etmek için şifrenle hesabı yeniden aç ya da çıkış yap.",

@@ -128,6 +128,12 @@ export async function sendPendingPhotos(supabase: SupabaseClient, signal: AbortS
   }
 }
 
+/** Photos a live row names that Storage does not have: this device holds the only copy. */
+export async function unsentPhotoCount(): Promise<number> {
+  const sqlite = await getSqliteAsync();
+  return (await sqlite.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM photos WHERE uploaded_at IS NULL AND id IN (${NAMED})`))!.n;
+}
+
 async function download(supabase: SupabaseClient, path: string): Promise<string | null> {
   const { data, error } = await supabase.storage.from(BUCKET).download(path);
   if (error) {
