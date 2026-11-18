@@ -211,7 +211,7 @@ async function download(supabase: SupabaseClient, path: string): Promise<string 
   if (error) {
     // A 4xx is Storage answering: not there, or not this person's to read. A
     // network failure carries the field too, left undefined.
-    if (error.status != null && error.status < 500) return null;
+    if ((error.status ?? 500) < 500) return null;
     throw new Error(`photo download: ${error.message}`);
   }
   return jpegDataUri(await base64OfBlob(data));

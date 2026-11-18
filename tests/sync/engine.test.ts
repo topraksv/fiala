@@ -11,6 +11,7 @@
  */
 
 import type { DatabaseSync } from "node:sqlite";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeCloud } from "./fake-cloud";
 
@@ -48,11 +49,12 @@ const { tr } = await import("../../src/i18n/tr");
 const { migratedDatabase } = await import("../helpers");
 const { migrateDb } = await import("../../src/db/migrate");
 const { deterministicId, naturalKeys } = await import("../../src/db/ids");
-const { addPackage, openHousehold, readCabinet, remainingMilli, setPhoto, takeFrom } = await import("../../src/data/cabinet");
+const { addNamed, addPackage, openHousehold, readCabinet, remainingMilli, setPhoto, takeFrom } = await import("../../src/data/cabinet");
 const { readPhoto } = await import("../../src/data/photos");
-const { purgeOwnPhotos, refusedFiles, unsentPhotoCount } = await import("../../src/sync/photos");
+const { fetchMissingPhotos, purgeOwnPhotos, refusedFiles, sendPendingPhotos, sweepUnnamedPhotos, unsentPhotoCount } = await import("../../src/sync/photos");
+const { SessionEpochCancelledError } = await import("../../src/sync/session-epoch");
 const { addDocument, moveDocument, readDocuments } = await import("../../src/data/documents");
-const { fetchDocumentFile, purgeOwnDocuments, sweepUnnamedDocuments, unsentDocumentCount } = await import("../../src/sync/documents");
+const { fetchDocumentFile, purgeOwnDocuments, sendPendingDocuments, sweepUnnamedDocuments, unsentDocumentCount } = await import("../../src/sync/documents");
 const nowIsoOf = () => new Date().toISOString();
 const { addDosePlan, answerDose, readDoseAnswers, readDosePlans } = await import("../../src/data/doses");
 const { acceptInvite, answerOffer, cancelInvites, createInvite, offerCabinet, peekInvite, useOffers } = await import("../../src/sync/sharing");
@@ -94,6 +96,34 @@ async function boxWithPhoto(name = "Parol"): Promise<{ box: string; photoId: str
   const box = await addPackage(signedIn, { name }, { unit: "tablet" }, 1000);
   await setPhoto("packages", box, { data: JPEG, thumb: JPEG });
   return { box, photoId: String((harness.db!.prepare("SELECT photo_id FROM packages WHERE id = ?").get(box) as { photo_id: string }).photo_id) };
+}
+/** The server as the engine is handed it, for a call made to one function alone. */
+const client = () => cloud.client() as unknown as SupabaseClient;
+/** The signal of a session that has ended. */
+const ended = () => {
+  const controller = new AbortController();
+  controller.abort();
+  return controller.signal;
+};
+/** The server, which ends the session just after answering the call named. */
+function endingAfter(call: "download" | "remove", controller: AbortController): SupabaseClient {
+  const real = cloud.client() as { rpc: unknown; storage: { from(bucket: string): Record<string, (...args: unknown[]) => Promise<unknown>> } };
+  return {
+    rpc: real.rpc,
+    storage: {
+      from: (bucket: string) => {
+        const held = real.storage.from(bucket);
+        return {
+          ...held,
+          [call]: async (...args: unknown[]) => {
+            const reply = await held[call]!(...args);
+            controller.abort();
+            return reply;
+          },
+        };
+      },
+    },
+  } as unknown as SupabaseClient;
 }
 const thumbs = async () => (await readCabinet()).flatMap((product) => product.boxes.map((box) => box.thumb));
 /** Delete a setting, as a feature's delete would, and take it back. */
@@ -1654,6 +1684,35 @@ describe("documents", () => {
     expect(cloud.documentObjects.size).toBe(0);
     expect(devices.C.prepare("SELECT uploaded_at FROM document_files WHERE id = ?").get(fileId), "marked unsent, should the account survive").toEqual({ uploaded_at: null });
   });
+
+  it("counts no refused file as unsent while its clue waits", async () => {
+    cloud.failOn.set("upload ", { message: "Payload too large", status: 413 });
+    await shared();
+    await on("C", async () => {
+      await sync();
+      expect(await readDeadLetters()).toHaveLength(1);
+      expect(await unsentDocumentCount(), "the clue says so; a freeze does not wait on it twice").toBe(0);
+    });
+  });
+
+  it("stops sending and sweeping files once the session has ended", async () => {
+    const { id } = await shared();
+    await on("C", async () => {
+      await addDocument(HOUSE, { ...FIELDS, title: "Tahlil" }, { base64: PDF, type: "pdf" });
+      const before = cloud.requests.length;
+      await expect(sendPendingDocuments(client(), ended())).rejects.toBeInstanceOf(SessionEpochCancelledError);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("upload"))).toEqual([]);
+      await deleteRows("documents", [id]);
+      expect(await sync()).toBe(true);
+    });
+    for (const object of cloud.documentObjects.values()) object.at -= 31 * 86_400_000;
+    await on("C", async () => {
+      const before = cloud.requests.length;
+      await expect(sweepUnnamedDocuments(client(), ended())).rejects.toBeInstanceOf(SessionEpochCancelledError);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("remove"))).toEqual([]);
+    });
+    expect(cloud.documentObjects.size, "left for a session that is still there").toBe(2);
+  });
 });
 
 describe("doses", () => {
@@ -1759,5 +1818,139 @@ describe("doses", () => {
       expect(await sync()).toBe(true);
     });
     expect(cloud.rows("package_moves").filter((move) => move.reason === "use" && move.deleted_at == null), "and the other device, settling the same answer, agrees").toEqual([]);
+  });
+});
+
+describe("photos and files, each call on its own", () => {
+  const refusal = { message: "new row violates row-level security policy", status: 403 };
+
+  it("marks a refused photo the moment Storage refuses it, tells whoever listens as it is marked and as it is retried, and keeps the clue of one the device lost", async () => {
+    const heard = vi.fn();
+    const stop = refusedFiles.subscribe(heard);
+    try {
+      await on("A", async () => {
+        const { photoId } = await boxWithPhoto();
+        cloud.failOn.set("upload", refusal);
+        await sync();
+        expect(refusedFiles.has(photoId), "the row says so at once, not at the next sync").toBe(true);
+        expect(heard).toHaveBeenCalledTimes(1);
+        const [letter] = await readDeadLetters();
+
+        devices.A.prepare("DELETE FROM photos WHERE id = ?").run(photoId);
+        expect(await retryDeadLetter(letter!.id), "nothing left to offer").toBe("missing");
+        expect(await readDeadLetters(), "the only trace left").toHaveLength(1);
+        expect(refusedFiles.has(photoId)).toBe(true);
+        expect(heard).toHaveBeenCalledTimes(1);
+
+        devices.A.prepare("INSERT INTO photos (id, data, thumb, created_at) VALUES (?, ?, ?, ?)").run(photoId, JPEG, JPEG, nowIsoOf());
+        expect(await retryDeadLetter(letter!.id)).toBe("requeued");
+        expect(refusedFiles.has(photoId), "offered again").toBe(false);
+        expect(heard).toHaveBeenCalledTimes(2);
+        expect(await readDeadLetters()).toEqual([]);
+      });
+    } finally {
+      stop();
+    }
+  });
+
+  it("keeps the clue of a document file the device no longer holds", async () => {
+    await on("A", async () => {
+      devices.A.prepare("INSERT INTO sync_dead_letters (outbox_id, table_name, row_id, payload, reason, quarantined_at) VALUES (-1, 'document_files', ?, '{}', 'refused', ?)").run("gone", nowIsoOf());
+      const [letter] = await readDeadLetters();
+      expect(await retryDeadLetter(letter!.id)).toBe("missing");
+      expect(await readDeadLetters()).toHaveLength(1);
+    });
+  });
+
+  it("names a refused photo by the person showing it", async () => {
+    await on("A", async () => {
+      const person = await addNamed("people", USER, "Ece");
+      await setPhoto("people", person, { data: JPEG, thumb: JPEG });
+      cloud.failOn.set("upload", refusal);
+      await sync();
+      expect(await readDeadLetters()).toMatchObject([{ tableName: "photos", subject: "Ece" }]);
+    });
+  });
+
+  it("says what Storage said when a photo could not be sent or fetched, whether or not it named a status", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      cloud.failOn.set("upload", { message: "Internal error", status: 503 });
+      await expect(sendPendingPhotos(client(), new AbortController().signal)).rejects.toThrow("photo upload: Internal error");
+      await sync();
+    });
+    await on("B", async () => {
+      cloud.downloadFailure = { message: "Internal error", status: 503 };
+      await sync();
+      for (const failure of [{ message: "Internal error", status: 500 }, { message: "Failed to fetch" }]) {
+        cloud.downloadFailure = failure;
+        await expect(fetchMissingPhotos(client(), new AbortController().signal), JSON.stringify(failure)).rejects.toThrow(`photo download: ${failure.message}`);
+      }
+    });
+  });
+
+  it("does not take half a photo, and does not ask again this session for the other half", async () => {
+    const { photoId } = await on("A", async () => {
+      const made = await boxWithPhoto();
+      await sync();
+      return made;
+    });
+    cloud.objects.delete(`${photoId}/thumb.jpg`);
+    await on("B", async () => {
+      expect(await sync()).toBe(true);
+      expect(devices.B.prepare("SELECT COUNT(*) AS n FROM photos").get()).toEqual({ n: 0 });
+      const before = cloud.requests.length;
+      await sync();
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("download"))).toEqual([]);
+    });
+  });
+
+  it("stops sending, fetching and sweeping photos once the session has ended, and leaves what the session had not finished", async () => {
+    const { box, photoId } = await on("A", async () => {
+      const made = await boxWithPhoto();
+      const before = cloud.requests.length;
+      await expect(sendPendingPhotos(client(), ended())).rejects.toBeInstanceOf(SessionEpochCancelledError);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("upload"))).toEqual([]);
+      await sync();
+      return made;
+    });
+    await on("B", async () => {
+      cloud.downloadFailure = { message: "Internal error", status: 503 };
+      await sync();
+      cloud.downloadFailure = null;
+      const before = cloud.requests.length;
+      await expect(fetchMissingPhotos(client(), ended())).rejects.toBeInstanceOf(SessionEpochCancelledError);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("download"))).toEqual([]);
+
+      const controller = new AbortController();
+      await expect(fetchMissingPhotos(endingAfter("download", controller), controller.signal)).rejects.toBeInstanceOf(SessionEpochCancelledError);
+      expect(devices.B.prepare("SELECT COUNT(*) AS n FROM photos").get(), "nothing is kept for a session that is gone").toEqual({ n: 0 });
+    });
+    await on("A", async () => {
+      await deleteRows("packages", [box]);
+      await sync();
+    });
+    for (const object of cloud.objects.values()) object.at -= 31 * 86_400_000;
+    devices.A.prepare("UPDATE photos SET created_at = ?").run(new Date(Date.now() - 31 * 86_400_000).toISOString());
+    await on("A", async () => {
+      const before = cloud.requests.length;
+      await expect(sweepUnnamedPhotos(client(), ended())).rejects.toBeInstanceOf(SessionEpochCancelledError);
+      expect(cloud.requests.slice(before).filter((request) => request.startsWith("remove"))).toEqual([]);
+
+      const controller = new AbortController();
+      await expect(sweepUnnamedPhotos(endingAfter("remove", controller), controller.signal)).rejects.toBeInstanceOf(SessionEpochCancelledError);
+      expect(cloud.objects.size, "Storage had answered").toBe(0);
+      expect(devices.A.prepare("SELECT id FROM photos WHERE id = ?").all(photoId), "the device's copy waits for a session that is there").toHaveLength(1);
+    });
+  });
+
+  it("purges nothing where no server is configured", async () => {
+    await on("A", async () => {
+      await boxWithPhoto();
+      await sync();
+      harness.cloud = { client: () => null };
+      await expect(purgeOwnPhotos()).resolves.toBeUndefined();
+      expect(devices.A.prepare("SELECT uploaded_at IS NOT NULL AS sent FROM photos").get()).toEqual({ sent: 1 });
+    });
   });
 });

@@ -467,8 +467,8 @@ export async function restoreArchive(
   accept: (backup: Backup) => Promise<boolean>,
   pull: () => Promise<boolean>,
 ): Promise<RestoredArchive | null> {
-  const { Unzip, UnzipPassThrough } = await import("fflate");
-  const entries = readEntries(Unzip, UnzipPassThrough);
+  const { Unzip } = await import("fflate");
+  const entries = readEntries(Unzip);
   let restored: RestoredArchive | null = null;
   let files: ReturnType<typeof fileSink> | null = null;
   try {
@@ -532,7 +532,7 @@ function fileSink(backup: Backup, me: string, restored: RestoredArchive) {
  * states its size is read: its end is then counted, never searched for. One
  * past what it may be is passed over unheld, its bytes `null`.
  */
-function readEntries(Unzip: typeof import("fflate").Unzip, UnzipPassThrough: typeof import("fflate").UnzipPassThrough) {
+function readEntries(Unzip: typeof import("fflate").Unzip) {
   const done: { name: string; bytes: Uint8Array | null }[] = [];
   let seen = 0;
   /** The last bytes read, where the writer's end-of-directory record is. */
@@ -551,7 +551,6 @@ function readEntries(Unzip: typeof import("fflate").Unzip, UnzipPassThrough: typ
     };
     entry.start();
   });
-  unzip.register(UnzipPassThrough);
   return {
     push(chunk: Uint8Array | null) {
       if (chunk) tail = joined([tail, chunk.subarray(-END_BYTES)]).slice(-END_BYTES);
