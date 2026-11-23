@@ -26,7 +26,7 @@ import { FOCUS_PROPERTY } from "../ui/focus-ring";
 import { KeyboardSafeRoot } from "../ui/keyboard-safe";
 import { useAppLock, useNavigationAcrossLock } from "../ui/app-lock";
 import { useDatabaseHandoff } from "../ui/database-handoff";
-import { Launch } from "../ui/launch";
+import { Launch, useMarkDrawn } from "../ui/launch";
 import { APPEARANCE_KEYS, isThemePreference, PALETTES, resolvePaletteId, ThemeContext } from "../ui/theme";
 import { subscribeAppearance, ThemeDissolve, type Appearance } from "../ui/theme-transition";
 import { ErrorBoundary } from "../ui/error-boundary";
@@ -219,7 +219,11 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
   const { locked: lockedHere, unlock } = useAppLock(ready, userId);
   // The device that freezes signs out; its own freezing is not a lock.
   const locked = frozen === true && operation !== "freeze";
-  useNavigationAcrossLock(lockedHere, lockedHere === false && !locked, userId);
+  // The first screen waits for the launch mark to finish drawing; so does anything that navigates in it.
+  const drawn = useMarkDrawn();
+  useNavigationAcrossLock(lockedHere, drawn && lockedHere === false && !locked, userId);
+  const settled = ready && !(signedIn && frozen == null) && lockedHere != null;
+  const shown = settled && drawn;
   useEffect(() => {
     // A launch that cannot decide opens on sign-in rather than on nothing.
     useSession.getState().bootstrap().catch(() => useSession.setState({ ready: true }));
@@ -227,81 +231,86 @@ function Routes({ background, onSettled }: { background: string; onSettled: () =
   // An undo offered to one account must not run against the next one's data.
   useEffect(() => clearUndo(), [userId]);
   useEffect(() => {
-    if (!signedIn || !WEB) return;
+    // Only into the routes: a push with no navigator throws, and the token is already taken.
+    if (!signedIn || !WEB || !shown || locked || lockedHere) return;
     void heldInvite({ take: true }).then((token) => {
       // Signed in already, the invitation page opened with its own fragment.
       if (token && !/\/invite\/?$/.test(location.pathname)) router.push({ pathname: "/invite", params: { token } });
     });
-  }, [signedIn]);
-  const settled = ready && !(signedIn && frozen == null) && lockedHere != null;
+  }, [signedIn, shown, locked, lockedHere]);
   // The launch screen stays over this gap, so it never shows as a blank frame.
   useEffect(() => {
-    if (settled) onSettled();
-  }, [settled, onSettled]);
+    if (shown) onSettled();
+  }, [shown, onSettled]);
   if (!settled) return null;
   return (
     <>
-      {lockedHere ? (
-        <View style={{ flex: 1, backgroundColor: background }}>
-          <EmptyState icon={LockKeyhole} title={tr.lock.title} hint={tr.lock.prompt} action={<Button label={tr.lock.button} onPress={() => void unlock()} />} />
-        </View>
-      ) : locked ? (
-        <FrozenGate />
-      ) : (
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: background } }}>
-          <Stack.Protected guard={signedIn}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="sync-issues" />
-            <Stack.Screen name="data-privacy" />
-            <Stack.Screen name="data-reset" />
-            <Stack.Screen name="account-security" />
-            <Stack.Screen name="add-box" />
-            <Stack.Screen name="box/[id]" />
-            <Stack.Screen name="boxes" />
-            <Stack.Screen name="documents" />
-            <Stack.Screen name="add-document" />
-            <Stack.Screen name="document/[id]" />
-            <Stack.Screen name="doses" />
-            <Stack.Screen name="dose-plan" />
-            <Stack.Screen name="import" />
-            <Stack.Screen name="product/[id]" />
-            <Stack.Screen name="names/[table]" />
-            <Stack.Screen name="household/[id]" />
-            <Stack.Screen name="invite" />
-            <Stack.Screen name="households" />
-            <Stack.Screen name="person/[id]" />
-            <Stack.Screen name="emergency/[id]" />
-            <Stack.Screen name="to-buy" />
-            <Stack.Screen name="to-dispose" />
-            <Stack.Screen name="history" />
-            <Stack.Screen name="notices" />
-            <Stack.Screen name="status-cards" />
-            <Stack.Screen name="profile" />
-            <Stack.Screen name="help" />
-            <Stack.Screen name="medicine/[id]" />
-            <Stack.Screen name="medicine/compare" />
-            <Stack.Screen name="pharmacies" />
-            <Stack.Screen name="pharmacy/[id]" />
-          </Stack.Protected>
-          <Stack.Protected guard={!signedIn}>
-            <Stack.Screen name="(auth)/sign-in" />
-          </Stack.Protected>
-          <Stack.Screen name="privacy" />
-          {/* Signed out too: sign-in sends a failure here. */}
-          <Stack.Screen name="feedback" />
-        </Stack>
-      )}
+      {drawn && <Screens lockedHere={lockedHere} locked={locked} unlock={unlock} signedIn={signedIn} background={background} />}
       {/* Kept while locked: the reopening may come from another device. */}
       {signedIn ? (
         <>
           <SyncRunner userId={userId} />
           <LiveRunner userId={userId} />
           <ReminderPlanner userId={userId} />
-          {locked || lockedHere ? null : <ReminderTaps />}
+          {locked || lockedHere || !drawn ? null : <ReminderTaps />}
         </>
       ) : null}
       {operation ? <OperationWait operation={operation} /> : null}
     </>
+  );
+}
+
+/** The first screen: the device lock, the frozen account's gate, or the routes. */
+function Screens({ lockedHere, locked, unlock, signedIn, background }: { lockedHere: boolean | null; locked: boolean; unlock: () => Promise<unknown> | void; signedIn: boolean; background: string }) {
+  return lockedHere ? (
+    <View style={{ flex: 1, backgroundColor: background }}>
+      <EmptyState icon={LockKeyhole} title={tr.lock.title} hint={tr.lock.prompt} action={<Button label={tr.lock.button} onPress={() => void unlock()} />} />
+    </View>
+  ) : locked ? (
+    <FrozenGate />
+  ) : (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: background } }}>
+      <Stack.Protected guard={signedIn}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="sync-issues" />
+        <Stack.Screen name="data-privacy" />
+        <Stack.Screen name="data-reset" />
+        <Stack.Screen name="account-security" />
+        <Stack.Screen name="add-box" />
+        <Stack.Screen name="box/[id]" />
+        <Stack.Screen name="boxes" />
+        <Stack.Screen name="documents" />
+        <Stack.Screen name="add-document" />
+        <Stack.Screen name="document/[id]" />
+        <Stack.Screen name="doses" />
+        <Stack.Screen name="dose-plan" />
+        <Stack.Screen name="import" />
+        <Stack.Screen name="product/[id]" />
+        <Stack.Screen name="names/[table]" />
+        <Stack.Screen name="household/[id]" />
+        <Stack.Screen name="invite" />
+        <Stack.Screen name="households" />
+        <Stack.Screen name="person/[id]" />
+        <Stack.Screen name="emergency/[id]" />
+        <Stack.Screen name="to-buy" />
+        <Stack.Screen name="to-dispose" />
+        <Stack.Screen name="history" />
+        <Stack.Screen name="notices" />
+        <Stack.Screen name="status-cards" />
+        <Stack.Screen name="profile" />
+        <Stack.Screen name="help" />
+        <Stack.Screen name="medicine/[id]" />
+        <Stack.Screen name="medicine/compare" />
+        <Stack.Screen name="pharmacies" />
+        <Stack.Screen name="pharmacy/[id]" />
+      </Stack.Protected>
+      <Stack.Protected guard={!signedIn}>
+        <Stack.Screen name="(auth)/sign-in" />
+      </Stack.Protected>
+      <Stack.Screen name="privacy" />
+      {/* Signed out too: sign-in sends a failure here. */}
+      <Stack.Screen name="feedback" />
+    </Stack>
   );
 }
 

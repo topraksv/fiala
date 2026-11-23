@@ -36,6 +36,25 @@ let launched = false;
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => (listeners.add(listener), () => void listeners.delete(listener));
 
+let markDone = false;
+const markListeners = new Set<() => void>();
+const subscribeMark = (listener: () => void) => (markListeners.add(listener), () => void markListeners.delete(listener));
+function markDrawn() {
+  if (markDone) return;
+  markDone = true;
+  for (const listener of markListeners) listener();
+}
+
+/**
+ * Whether the mark has finished drawing. The first screen mounts only then:
+ * mounted mid-draw, its render held the JavaScript thread for a frame of
+ * 80–120 ms (web export, CPU slowed 4×), and the drawing jumped. Mounted in
+ * the rest after it, the same work lands while nothing moves.
+ */
+export function useMarkDrawn(): boolean {
+  return useSyncExternalStore(subscribeMark, () => markDone, () => false);
+}
+
 /** Whether the launch screen has left: a dialog opened before it would sit over the mark still drawing. */
 export function useLaunched(): boolean {
   return useSyncExternalStore(subscribe, () => launched);
@@ -78,8 +97,14 @@ export function Launch({ shown, ready }: { shown: boolean; ready: boolean }) {
   }, [shown, drawable]);
 
   useEffect(() => {
+    // Reduced motion draws the mark at rest: there is nothing to wait for.
+    if (reducedMotion) markDrawn();
     if (!shown || reducedMotion) return;
-    const timer = setTimeout(() => setDrawn(true), brandMark.launch.draw + brandMark.launch.rest);
+    // Also ends the hold on the first screen, should the drawing's own clock not report its last frame.
+    const timer = setTimeout(() => {
+      markDrawn();
+      setDrawn(true);
+    }, brandMark.launch.draw + brandMark.launch.rest);
     return () => clearTimeout(timer);
   }, [shown, reducedMotion]);
 
@@ -136,7 +161,7 @@ export function Launch({ shown, ready }: { shown: boolean; ready: boolean }) {
           : { opacity },
       ]}
     >
-      {drawable && <BrandMark height={MARK_HEIGHT} duration={brandMark.launch.draw} named />}
+      {drawable && <BrandMark height={MARK_HEIGHT} duration={brandMark.launch.draw} named onDrawn={markDrawn} />}
     </Animated.View>
   );
 }
