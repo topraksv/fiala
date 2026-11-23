@@ -599,7 +599,7 @@ jobs:
       #   which is the loud failure to want.
       - name: Install the pinned EAS CLI without the credential
         env:
-          npm_config_before: "2026-09-25"
+          npm_config_before: "2026-11-20"
         run: npx --yes --ignore-scripts eas-cli@27.11.0 --version
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
