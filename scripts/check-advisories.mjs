@@ -6,17 +6,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 // Each entry is a claim someone checked. Empty is allowed, and a stale entry fails as loudly as an unacknowledged advisory.
-const ACKNOWLEDGED = [
-  {
-    id: "GHSA-fc5q-39xc-vjpf",
-    package: "picomatch",
-    checkedOn: "2026-11-18",
-    recheckAfter: "2027-01-18",
-    expectedPaths: ["@vitest/coverage-v8", "babel-preset-expo", "expo", "react-native", "react-native-reanimated", "react-native-worklets", "vitest"],
-    reason:
-      "No patched release: every version through 4.0.7, the latest, is affected (ReDoS on a repeated single-branch extglob). It matches globs written by the build tools themselves (Metro's file map, Babel, tinyglobby in react-native's Node scripts, Vitest), never text from a user, and the web export contains none of it.",
-  },
-];
+const ACKNOWLEDGED = [];
 
 // Dependencies installed outside the npm registry, which `npm audit` and Dependabot cannot see; `reviewed` is what was read and found not to apply.
 const UNAUDITED = [
@@ -25,8 +15,8 @@ const UNAUDITED = [
     version: "0.20.3",
     advisories: "https://cdn.sheetjs.com/advisories/",
     reviewed: ["CVE-2023-30533", "CVE-2024-22363"],
-    checkedOn: "2026-09-02",
-    recheckAfter: "2026-12-02",
+    checkedOn: "2026-11-23",
+    recheckAfter: "2027-02-23",
     reason:
       "SheetJS publishes from its own CDN, so neither `npm audit` nor Dependabot has a registry record to match and neither will ever report it. Both advisories the publisher lists are fixed below the pinned version: CVE-2023-30533 (prototype pollution) in 0.19.3 and CVE-2024-22363 (ReDoS) in 0.20.2, against 0.20.3 here. The tarball is pinned by URL and by sha512 in package-lock.json, so the bytes cannot change under the pin. Re-read the publisher's advisory page and re-check the pinned version before expiry.",
   },

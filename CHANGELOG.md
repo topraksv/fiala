@@ -8,6 +8,12 @@ Notlar kısa tutulur: ne değişti, tek cümle. Sebebi ve ölçümü commit'te.
 `scripts/release-notes.mjs` bir bölümü etiketinin GitHub sürüm notuna çevirir;
 bölümü olmayan sürüm yayımlanamaz.
 
+## 0.3.1
+
+### Patch Changes
+
+- Expo SDK 58'in son düzeltme sürümleri kuruldu; web'de arkada kalan ekran artık dokunuş ve klavye odağı almıyor.
+
 ## 0.3.0
 
 ### Minor Changes

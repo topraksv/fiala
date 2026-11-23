@@ -11,9 +11,9 @@ import { extname, join, relative } from "node:path";
 const root = process.argv[2] ?? "dist";
 
 const limits = {
-  entryJavaScript: 2_499_900,
-  totalJavaScript: 3_323_300,
-  totalExport: 5_553_000,
+  entryJavaScript: 2_512_000,
+  totalJavaScript: 3_337_000,
+  totalExport: 5_566_600,
   // A picture set can grow for a product reason and would otherwise hide a code regression in the total.
   pictureBytes: 60_800,
   // Exact, so adding a weight has to be a decision.

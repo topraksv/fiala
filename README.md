@@ -84,11 +84,12 @@ cihazların ve evdekilerin arasını eşitlemek içindir, çalışmanın şartı
 | **Bir ilacı tanımak** | **Rehber** | TİTCK listesinde arama, etkin madde ve ATC grubu, KÜB/KT bağlantısı, evdeki kutuları |
 | **Yakında eczane** | **Rehber → Eczaneler** | Yakınımdakiler ya da il ve ilçe; telefonda harita, arama, yol tarifi; nöbetçi eczane e-Devlet'te |
 | **Doz takibi** | **Durum → Doz Takvimi** | Kişi başına plan, takvim ve hatırlatma |
-| **Reçeteler** | **Dolabım → Belgeler** | Fotoğraf ya da PDF; ilaçlara ve kutulara bağlanır |
+| **Reçeteler** | **Dolabım → Belgeler** | Fotoğraf ya da PDF; ilaçlara ve kutulara bağlanır, hanenin tamamına ya da seçilen kişilere gösterilir |
 | **Acil durumda** | **Dolabım → Kişileri Düzenle → kişi** | Alerjiler, kronik hastalıklar ve şu an alınan ilaçlar; acil durum kartı büyük yazıyla gösterir ve paylaşır |
 | **Süresi geçenler** | **Durum → Atılacaklar** | Atılacak kutular ve nasıl atılacakları, Sıfır Atık kılavuzuyla |
+| **Ne oldu, ne kaldı?** | **Durum → Geçmiş ve Raporlar** | Hangi kutu ne zaman eklendi, kullanıldı, bitti; SKT'si yaklaşan ve bilgisi eksik kutuların sayısı; doktora ya da eczacıya gidecek ilaç listesi |
 | **Evdekilerle paylaşmak** | **Ayarlar → Hane** | Davet bağlantısı ya da kodu: yönetici, düzenleyen ya da yalnız gören |
-| **Yedek** | **Ayarlar → Veri ve Gizlilik** | Excel'e aktarma, yedekleme ve geri yükleme, belgeleri kimin açabildiği |
+| **Yedek** | **Ayarlar → Veri ve Gizlilik** | Excel'e aktarma, belgeler ve fotoğraflar dahil yedekleme ve geri yükleme, belgeleri kimin açabildiği |
 | **Hesap** | **Ayarlar → Hesap güvenliği** | E-posta, şifre, veri sıfırlama, dondurma ve silme |
 
 ---

@@ -207,7 +207,7 @@ jobs:
       # stripping breaks this SDK's toolchain (it chokes on expo-modules-core's
       # src/index.ts), so the pin is a floor AND a ceiling and
       # `docs/ARCHITECTURE.md` records both.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -265,7 +265,7 @@ jobs:
           echo "files=$files" >> "$GITHUB_OUTPUT"
           echo "shard $MUTATION_SHARD mutates $files file(s)"
       - if: steps.scope.outputs.files != '0'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -277,7 +277,7 @@ jobs:
       # explain why are in this report, and re-running a release scope to find
       # them costs the same hour again.
       - if: failure() && steps.scope.outputs.files != '0'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mutation-report-${{ github.run_id }}-shard${{ matrix.shard }}
           path: reports/mutation
@@ -295,7 +295,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -338,7 +338,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -347,7 +347,7 @@ jobs:
         env:
           EXPO_NO_DOTENV: "1"
         run: npx expo export --output-dir "$RUNNER_TEMP/dist-mobile" --source-maps --dump-assetmap --platform ios --platform android --clear
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-mobile-${{ github.run_id }}
           path: ${{ runner.temp }}/dist-mobile
@@ -365,7 +365,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -373,7 +373,7 @@ jobs:
       # Local-only by construction (blank Supabase env), which is why it never
       # becomes the Pages artifact and why the suite can never write real data.
       - run: npm run test:e2e:export
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-e2e-${{ github.run_id }}
           path: dist-e2e
@@ -399,7 +399,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -421,7 +421,7 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         env:
           BROWSER: ${{ matrix.browser }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist-e2e-${{ github.run_id }}
           path: dist-e2e
@@ -435,7 +435,7 @@ jobs:
           PROJECT: ${{ matrix.project }}
           SHARD: ${{ matrix.shard }}
       - if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-failure-${{ github.run_id }}-${{ strategy.job-index }}
           path: |
@@ -446,7 +446,7 @@ jobs:
       # and deploys. The failed attempt's trace and screenshot are in
       # test-results; a clean run leaves none, so this uploads nothing then.
       - if: success()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-flaky-${{ github.run_id }}-${{ strategy.job-index }}
           path: |
@@ -521,7 +521,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
       # Publishes the artifact `web-build` produced. No second export: a
@@ -569,7 +569,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           # It runs `npm ci` beside `EXPO_TOKEN`: a package cache any workflow
@@ -600,8 +600,8 @@ jobs:
       - name: Install the pinned EAS CLI without the credential
         env:
           npm_config_before: "2026-09-25"
-        run: npx --yes --ignore-scripts eas-cli@24.8.0 --version
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        run: npx --yes --ignore-scripts eas-cli@27.11.0 --version
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist-mobile-${{ github.run_id }}
           path: ${{ runner.temp }}/dist-mobile
@@ -620,7 +620,7 @@ jobs:
           # uploads `mobile-build`'s export, and `--platform all` takes the ios
           # and android it holds. `--json` prints only the updates to stdout;
           # the CLI's own log goes to stderr.
-          npx --yes=false eas-cli@24.8.0 update --branch preview --environment preview --platform all --skip-bundler --input-dir "$RUNNER_TEMP/dist-mobile" --message "$version $GITHUB_SHA" --non-interactive --json > "$RUNNER_TEMP/eas-update.json"
+          npx --yes=false eas-cli@27.11.0 update --branch preview --environment preview --platform all --skip-bundler --input-dir "$RUNNER_TEMP/dist-mobile" --message "$version $GITHUB_SHA" --non-interactive --json > "$RUNNER_TEMP/eas-update.json"
       # One update per platform, one group, on the runtime Expo Go runs — and
       # the group and update ids written onto the run's summary, which is the
       # record a rollback republishes from.
