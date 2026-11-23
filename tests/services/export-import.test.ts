@@ -556,6 +556,7 @@ describe("a backup with its files", () => {
     expect(missing).toBe(0);
   });
 
+  // 65,535 rows through SQLite and a zip: 2.3 s alone here, past 5 s on a CI runner under coverage.
   it("writes an archive of 65,535 entries, the most a zip without Zip64 holds, and refuses one more", async () => {
     harness.db!.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 32767)
       INSERT INTO photos (id, data, thumb, created_at) SELECT printf('01900001-0000-7000-8000-%012x', i), 'data:image/jpeg;base64,/9j/', 'data:image/jpeg;base64,/9j/', 'x' FROM n`);
@@ -567,7 +568,7 @@ describe("a backup with its files", () => {
 
     await addDocument(ME, FIELDS, { base64: PDF, type: "pdf" });
     await expect(archive(ME)).rejects.toThrow("15 MB");
-  });
+  }, 30_000);
 
   it("says an archive is damaged when its last record is not the directory's end", async () => {
     await withFiles(ME);
