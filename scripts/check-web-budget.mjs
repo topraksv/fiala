@@ -5,6 +5,10 @@
  * configuration.
  */
 // Metro does not tree-shake: a ceiling is what names the commit that pulled a library into the entry bundle.
+// A ceiling moves only once the growth is attributed: export HEAD (`git archive HEAD | tar -x`, `node_modules` symlinked) and the
+// tree with `--source-maps` and the same empty Supabase env, then group bytes by `node_modules/<package>` and `src/<layer>`. Normalise
+// each source from its last `/node_modules/` or first `/src/`, or the symlinked copy reports thousands of changed files.
+// React Compiler growth is not bloat: count `react.memo_cache_sentinel` and `.c)(n)` in the export before blaming a dependency.
 import { readFile, readdir, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 

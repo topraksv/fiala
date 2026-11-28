@@ -594,7 +594,7 @@ export const toggleSize = { width: 46, height: 28, padding: 3, glyph: 11, glyphI
 
 /**
  * The mark drawing itself (`src/ui/brand.tsx`), on the brand kit's timeline
- * (`docs/fiala-brand.zip`, `motion/fiala-motion.json`): the staff is traced,
+ * (its `motion/fiala-motion.json`): the staff is traced,
  * the thread's turns follow `every` apart, then the three leaves open from
  * their stems `every` apart, each swinging in by `turn` degrees. Milliseconds
  * from the first frame.

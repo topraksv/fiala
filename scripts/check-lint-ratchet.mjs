@@ -1,6 +1,6 @@
 // Fails when a lint rule fires more often than lint-baseline.json records; errors fail outright.
 // Per rule, not per file: a file-level baseline would be rewritten whenever a file moved. `--record` adopts the counts by hand.
-// Shells out to `expo lint --no-cache`: a warm cache reports nothing for unchanged files, so the ratchet would fall to whatever was cached.
+// Shells out to `expo lint --no-cache` (plain ESLint outside Expo): a warm cache reports nothing for unchanged files, so the ratchet would fall to whatever was cached.
 // SDK 58 moved that cache to `.expo/cache/eslint/`, so deleting `.eslintcache` left it warm and four errors passed locally.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -63,10 +63,18 @@ function readBaseline() {
   }
 }
 
+/** `expo lint` in an Expo app, ESLint itself elsewhere (gital-fiyat is an Edge extension). */
+function lintCommand() {
+  const { dependencies = {}, devDependencies = {} } = JSON.parse(readFileSync("package.json", "utf8"));
+  return "expo" in dependencies || "expo" in devDependencies
+    ? ["expo", "lint", "--no-cache", "--", "--format", "json"]
+    : ["eslint", "--no-cache", "--format", "json"];
+}
+
 function runLint() {
-  // `expo lint` exits non-zero on a real error; the report is still read.
+  // Lint exits non-zero on a real error; the report is still read.
   try {
-    return execFileSync("npx", ["expo", "lint", "--no-cache", "--", "--format", "json"], {
+    return execFileSync("npx", lintCommand(), {
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     });

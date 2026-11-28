@@ -86,7 +86,9 @@ const ME = "11111111-1111-4111-8111-111111111111";
 const EXPIRED = "date fiala-reminders: Son kullanma tarihi doldu — ";
 const CHANNEL = ["channel fiala-reminders", "Hatırlatmalar 3"];
 
+// Mid-month: a box due in three days on the 1st would be said after the month's cabinet check.
 beforeEach(() => {
+  vi.useFakeTimers({ now: new Date(2026, 5, 10, 12), toFake: ["Date"] });
   calls.length = 0;
   payloads.length = 0;
   moments.length = 0;

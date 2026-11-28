@@ -61,6 +61,10 @@ jobs:
           # `security-and-quality` also reports maintainability queries, which
           # would bury real findings in a single-developer repository.
           queries: security-extended
+          # Captured shop pages are test data: their own scripts, read and never run.
+          config: |
+            paths-ignore:
+              - tests/fixtures
       # No build step: CodeQL extracts JS/TS directly from source. Running the
       # Expo web export here would only duplicate the `web-build` job's work.
       - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4

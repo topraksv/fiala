@@ -1,4 +1,4 @@
-// Generated from the Claude Design kit (`docs/fiala-brand.zip`, `svg/fiala-mark-source.svg` and `svg/fiala-wordmark.svg`); straight runs simplified within 0.04 of a unit, coordinates rounded to a tenth. Regenerate from the kit, never by hand.
+// Generated from the Claude Design kit (its `svg/fiala-mark-source.svg` and `svg/fiala-wordmark.svg`); straight runs simplified within 0.04 of a unit, coordinates rounded to a tenth. Regenerate from the kit, never by hand.
 
 export const VIEW_BOX = "65.6 25.7 68.8 162.9";
 /** Width over height, which `brand.tsx` repeats so a box is sized before this chunk arrives. */

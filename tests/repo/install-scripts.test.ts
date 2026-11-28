@@ -68,7 +68,9 @@ function packagesWithInstallScripts(root = "node_modules"): string[] {
 }
 
 /** Every install hook is an allowlisted decision; a new one fails here, and an entry no longer installed must be pruned. */
-const ALLOWED = ["esbuild", "unrs-resolver"];
+const manifest = JSON.parse(readFileSync("package.json", "utf8")) as { dependencies?: Record<string, string> };
+// `unrs-resolver` arrives with Expo's lint configuration; a member without Expo (gital-fiyat) never installs it.
+const ALLOWED = ["esbuild", ...("expo" in (manifest.dependencies ?? {}) ? ["unrs-resolver"] : [])];
 
 describe("install-time code execution", () => {
   it("runs install scripts only from the packages that are meant to", () => {
